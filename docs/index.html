@@ -10,23 +10,26 @@
   :root { --bg:#202124; --card:#2b2c2f; --fg:#e8eaed; --mut:#9aa0a6; --orange:#ff8a1f; --blue:#2f80ff; }
   @media (prefers-color-scheme: light) { :root { --bg:#fff; --card:#f1f3f4; --fg:#202124; --mut:#5f6368; } }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 "Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif; }
   main { max-width:920px; margin:0 auto; padding:56px 20px 80px; }
   header { text-align:center; }
   header img { width:84px; height:84px; }
   h1 { font-size:54px; font-weight:300; margin:8px 0 6px; letter-spacing:.5px; }
-  .tag { color:var(--mut); font-size:19px; margin:0 auto 28px; max-width:560px; }
-  .btn { display:inline-block; padding:14px 30px; border-radius:30px; color:#fff; text-decoration:none; font-weight:600;
+  .tag { color:var(--mut); font-size:20px; line-height:1.5; margin:0 auto 32px; max-width:560px; }
+  .btn { display:inline-block; min-height:48px; padding:12px 32px; border-radius:24px; color:#10131a; text-decoration:none; font-weight:600; /* dark text: white on orange is only 2.3:1 */
          background:linear-gradient(135deg,var(--orange),#e8559a 50%,var(--blue)); box-shadow:0 6px 24px #0004; }
   .btn:hover { filter:brightness(1.08); }
+  a:focus-visible { outline:3px solid var(--blue); outline-offset:3px; }
+  .btn:focus-visible { outline-color:var(--fg); }
+  @media (prefers-reduced-motion: reduce) { * { transition:none !important; animation:none !important; } }
   .small { color:var(--mut); font-size:14px; margin-top:12px; }
   .shot { display:block; width:100%; margin:44px 0 12px; border-radius:12px; box-shadow:0 12px 40px #0006; }
   .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:16px; margin-top:36px; }
   .card { background:var(--card); border-radius:14px; padding:20px 22px; }
   .card h3 { margin:0 0 6px; font-size:17px; }
-  .card p { margin:0; color:var(--mut); font-size:15px; }
+  .card p { margin:0; color:var(--mut); font-size:15px; line-height:1.5; }
   footer { text-align:center; color:var(--mut); margin-top:56px; font-size:14px; }
-  footer a { color:inherit; }
+  footer a { color:inherit; text-underline-offset:3px; }
 </style>
 </head>
 <body>

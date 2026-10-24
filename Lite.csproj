@@ -12,11 +12,13 @@
     <AssemblyName>Orbit</AssemblyName>
     <ApplicationIcon>Assets\orbit.ico</ApplicationIcon>
     <Product>Orbit</Product>
+    <Version>1.0.1</Version>
     <RootNamespace>Lite</RootNamespace>
     <NoWarn>CS8632;CS0618;CS1998</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="Assets\orbit.ico" />
+    <Resource Include="Assets\orbit-256.png" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="CefSharp.Wpf.HwndHost" Version="154.0.340" />

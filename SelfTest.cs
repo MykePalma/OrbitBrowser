@@ -1,4 +1,6 @@
 using System.IO;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Net;
 using System.Windows;
 using System.Windows.Automation.Peers;
@@ -15,13 +17,55 @@ static class SelfTest
     static async Task<bool> Until(Func<bool> f, int ms = 8000) { var t = Environment.TickCount; while (Environment.TickCount - t < ms) { try { if (f()) return true; } catch { } await Task.Delay(100); } return false; }
     static void Click(Button b) { ((IInvokeProvider)new ButtonAutomationPeer(b).GetPattern(PatternInterface.Invoke)).Invoke(); }
     static string BtnText(System.Windows.Controls.Button b) => b.Content is System.Windows.Controls.StackPanel sp ? string.Concat(sp.Children.OfType<System.Windows.Controls.TextBlock>().Select(t => t.Text)) : b.Content?.ToString() ?? "";
+    static byte[] FakeZip; static string FakeJson;
+    static byte[] MakeZip(params (string name, string text)[] files) { using var ms = new MemoryStream(); using (var z = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, true)) foreach (var (n, tx) in files) { var e = z.CreateEntry(n); using var s = e.Open(); var b = System.Text.Encoding.UTF8.GetBytes(tx); s.Write(b); } return ms.ToArray(); }
+    static string Release(string tag, byte[] zip, int port, string sha = null) => System.Text.Json.JsonSerializer.Serialize(new { tag_name = tag, html_url = "http://localhost/rel", body = "notes", assets = new[] { new { name = "Orbit-win-x64.zip", browser_download_url = $"http://localhost:{port}/updfiles/Orbit-win-x64.zip", size = zip.Length, digest = "sha256:" + (sha ?? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(zip)).ToLowerInvariant()) } } });
     static async Task<string> Js(Tab t, string s) { var r = await t.Browser.EvaluateScriptAsync(s); return r.Success ? r.Result?.ToString() : "ERR:" + r.Message; }
 
     const string Page = "<html><head><title>{0}</title></head><body><h1>{0}</h1><p>alpha beta alpha gamma alpha</p><a id=l href='/two' target=_blank>pop</a> <a id=d href='/file.bin' download>dl</a><img src='https://doubleclick.net/x.png' onerror='window.blocked=1'></body></html>";
 
+    /// <summary>Seeds sample data and renders each themed window to a PNG (in %TEMP%\orbit-ui) so the design can be reviewed.</summary>
+    static async Task UiShots(MainWindow w)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "orbit-ui"); Directory.CreateDirectory(dir); foreach (var f in Directory.GetFiles(dir)) File.Delete(f);
+        void Shot(Window win, string name)
+        {
+            win.UpdateLayout(); var vis = (FrameworkElement)win.Content; int pw = (int)Math.Ceiling(win.ActualWidth), ph = (int)Math.Ceiling(win.ActualHeight);
+            var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(pw, ph, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            rtb.Render(win);   // the window itself, so its own Background is what we see
+            var enc = new System.Windows.Media.Imaging.PngBitmapEncoder(); enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(rtb)); using var fs = File.Create(Path.Combine(dir, name + ".png")); enc.Save(fs);
+        }
+        await Task.Delay(1500);
+        // sample data
+        var now = DateTime.Now; string[][] sites = { new[] { "Orbit Browser · GitHub", "https://github.com/MykePalma/OrbitBrowser" }, new[] { "Wikipedia, the free encyclopedia", "https://en.wikipedia.org/wiki/Main_Page" }, new[] { "YouTube", "https://www.youtube.com/" }, new[] { "Speedtest by Ookla", "https://www.speedtest.net/" }, new[] { "Chromium (web browser) - Wikipedia", "https://en.wikipedia.org/wiki/Chromium_(web_browser)" }, new[] { "Docs: WCAG 2.2 What's new", "https://www.w3.org/WAI/standards-guidelines/wcag/new-in-22/" }, new[] { "Example Domain", "https://example.com/" }, new[] { "DuckDuckGo", "https://duckduckgo.com/" } };
+        for (int k = 0; k < 14; k++) { var s = sites[k % sites.Length]; Store.D.History.Add(new HistoryItem { Title = s[0], Url = s[1] + (k > 7 ? "?p=" + k : ""), Time = now.AddHours(-k * (k < 6 ? 0.7 : 9)) }); }
+        Store.D.Folders.AddRange(new[] { "Work", "Work/Design", "Reading" });
+        Store.D.Bookmarks.AddRange(new[] { new Bookmark { Title = "Orbit on GitHub", Url = "https://github.com/MykePalma/OrbitBrowser" }, new Bookmark { Title = "WCAG 2.2 overview", Url = "https://www.w3.org/WAI/standards-guidelines/wcag/new-in-22/", Folder = "Work/Design" }, new Bookmark { Title = "Fluent 2 typography", Url = "https://fluent2.microsoft.design/typography", Folder = "Work/Design" }, new Bookmark { Title = "Wikipedia", Url = "https://en.wikipedia.org/", Folder = "Reading" } });
+        DownloadsWindow.Add(1, "x", @"C:\Users\you\Downloads\Orbit-win-x64.zip"); DownloadsWindow.Update(1, 120_000_000, 266_000_000, 45, false, false, "", null);
+        DownloadsWindow.Add(2, "x", @"C:\Users\you\Downloads\quarterly-report.pdf"); DownloadsWindow.Update(2, 2_400_000, 2_400_000, 100, true, false, "", null);
+        DownloadsWindow.Add(3, "x", @"C:\Users\you\Downloads\holiday-photos.zip"); DownloadsWindow.Update(3, 10, 1000, 1, false, true, "", null);
+        MainWindow.RefreshAll(); await Task.Delay(300);
+
+        w.ShowSettings(); var sw = Application.Current.Windows.OfType<SettingsWindow>().First(); await Task.Delay(600);
+        foreach (var page in new[] { "General", "Appearance", "Privacy", "Downloads", "Updates", "About" }) { sw.ShowPage(page); await Task.Delay(400); Shot(sw, "settings-" + page.ToLower()); }
+        sw.Close();
+        w.ShowHistory(); var hw = Application.Current.Windows.OfType<HistoryWindow>().First(); await Task.Delay(700); Shot(hw, "history"); hw.Close();
+        w.ShowDownloads(); var dw = Application.Current.Windows.OfType<DownloadsWindow>().First(); await Task.Delay(600); Shot(dw, "downloads");
+        w.ShowBookmarks(); var bw = Application.Current.Windows.OfType<BookmarkManager>().First(); await Task.Delay(700); Shot(bw, "bookmarks"); bw.Close();
+        var bd = new BookmarkDialog(w, Store.D.Bookmarks[1], false); bd.Show(); await Task.Delay(500); Shot(bd, "bookmark-dialog"); bd.Close();
+        var pr = new PromptWindow("New folder", "Folder name", "Reading list") { Owner = w }; pr.Show(); await Task.Delay(400); Shot(pr, "prompt"); pr.Close();
+        var au = new AuthWindow("example.com – Restricted area"); au.Show(); await Task.Delay(400); Shot(au, "auth"); au.Close();
+        // empty states
+        Store.D.History.Clear(); w.ShowHistory(); hw = Application.Current.Windows.OfType<HistoryWindow>().First(); await Task.Delay(600); Shot(hw, "history-empty"); hw.Close();
+        Store.D.Bookmarks.Clear(); Store.D.Folders.Clear(); w.ShowBookmarks(); bw = Application.Current.Windows.OfType<BookmarkManager>().First(); await Task.Delay(600); Shot(bw, "bookmarks-empty"); bw.Close();
+        DownloadsWindow.Items.Clear(); await Task.Delay(300); Shot(dw, "downloads-empty");
+        File.WriteAllText(Path.Combine(dir, "done.txt"), "ok");
+        Application.Current.Shutdown();
+    }
+
     static async Task Demo(MainWindow w)
     {
-        if (App.SelfTest == "--selftest-demo") { await Task.Delay(1500); w.Navigate("https://example.com"); await Task.Delay(3000); w.ToggleSplit(); await Task.Delay(800); w.Navigate("https://en.wikipedia.org"); await Task.Delay(60000); return; }
+        if (App.SelfTest == "--selftest-demo") { await Task.Delay(1500); w.WindowState = WindowState.Maximized; w.Navigate("https://www.facebook.com"); w.NewTab("https://github.com"); w.NewTab("https://duckduckgo.com"); w.NewTab("https://en.wikipedia.org"); w.NewTab("https://www.youtube.com"); await Task.Delay(60000); return; }
         if (App.SelfTest == "--selftest-demo") { await Task.Delay(2000); w.Navigate("chrome://gpu"); await Task.Delay(5000); var r = await Js(w.Cur, "document.body.innerText.slice(0,2500)"); File.WriteAllText(Path.Combine(Store.Dir, "gpu.txt"), r); Application.Current.Shutdown(); return; }
         await Task.Delay(1500);
         w.Navigate("https://en.wikipedia.org/wiki/Chromium_(web_browser)"); await Task.Delay(5000);
@@ -32,6 +76,14 @@ static class SelfTest
 
     public static async Task Run(MainWindow w)
     {
+        if (App.SelfTest == "--selftest-live")
+        {
+            await Task.Delay(1500); var now = DateTime.Now;
+            for (int k = 0; k < 12; k++) Store.D.History.Add(new HistoryItem { Title = new[] { "web design good practices wiki - Pesquisa Google", "Facebook", "DuckDuckGo - Protection. Privacy. Peace of mind.", "Speedtest by Ookla" }[k % 4], Url = new[] { "https://www.google.com/search?q=x", "https://www.facebook.com/", "https://duckduckgo.com/", "https://www.speedtest.net/" }[k % 4], Time = now.AddMinutes(-k * 7) });
+            try { w.ShowHistory(); } catch (Exception ex) { File.WriteAllText(Path.Combine(Path.GetTempPath(), "orbit-live-error.txt"), ex.ToString()); }
+            await Task.Delay(60000); Application.Current.Shutdown(); return;
+        }
+        if (App.SelfTest == "--selftest-ui") { try { await UiShots(w); } catch (Exception ex) { File.WriteAllText(Path.Combine(Path.GetTempPath(), "orbit-ui-error.txt"), ex.ToString()); Application.Current.Shutdown(); } return; }
         if (App.SelfTest == "--selftest-demo") { await Demo(w); return; }
         var lst = new HttpListener(); int port = 18080 + new Random().Next(500); lst.Prefixes.Add($"http://localhost:{port}/"); lst.Start();
         _ = Task.Run(async () =>
@@ -41,7 +93,9 @@ static class SelfTest
                 try
                 {
                     var c = await lst.GetContextAsync(); var p = c.Request.Url.AbsolutePath; byte[] body; string ct = "text/html";
-                    if (p == "/file.bin") { body = new byte[300000]; ct = "application/octet-stream"; c.Response.AddHeader("Content-Disposition", "attachment; filename=file.bin"); }
+                    if (p == "/updapi/releases/latest") { body = System.Text.Encoding.UTF8.GetBytes(FakeJson ?? "{}"); ct = "application/json"; }
+                    else if (p == "/updfiles/Orbit-win-x64.zip") { body = FakeZip ?? Array.Empty<byte>(); ct = "application/zip"; }
+                    else if (p == "/file.bin") { body = new byte[300000]; ct = "application/octet-stream"; c.Response.AddHeader("Content-Disposition", "attachment; filename=file.bin"); }
                     else if (p == "/auth") { c.Response.StatusCode = 401; c.Response.AddHeader("WWW-Authenticate", "Basic realm=\"t\""); body = System.Text.Encoding.UTF8.GetBytes("no"); }
                     else body = System.Text.Encoding.UTF8.GetBytes(string.Format(Page, p == "/" ? "Home" : p.Trim('/')));
                     c.Response.ContentType = ct; c.Response.OutputStream.Write(body); c.Response.Close();
@@ -53,7 +107,7 @@ static class SelfTest
         try
         {
             await Task.Delay(2000);
-            var t0 = w.Cur; R("startup: one tab", w.Tabs.Count == 1 && t0 != null, $"tabs={w.Tabs.Count} cur={t0?.Url} wins={App.Windows.Count}");
+            var t0 = w.Cur; R("startup: one tab", w.Tabs.Count == 1 && t0 != null, $"tabs={w.Tabs.Count} cur={t0?.Url} wins={App.Browsers.Count}");
             R("newtab page loads", await Until(() => !t0.Loading && t0.Url.Contains("newtab.html")), t0.Url);
             R("newtab omnibox empty", w.UrlBox.Text == "");
 
@@ -131,7 +185,7 @@ static class SelfTest
             R("download file saved", DownloadsWindow.Items.Count > 0 && File.Exists(DownloadsWindow.Items[0].Path), DownloadsWindow.Items.FirstOrDefault()?.Path);
 
             // windows
-            w.ShowHistory(); await Task.Delay(300); var hw = Application.Current.Windows.OfType<ListWindow>().FirstOrDefault(x => x.Title == "History"); R("history window", hw != null && hw.IsVisible); hw?.Close();
+            w.ShowHistory(); await Task.Delay(300); var hw = Application.Current.Windows.OfType<HistoryWindow>().FirstOrDefault(); R("history window", hw != null && hw.IsVisible); hw?.Close();
             w.ShowBookmarks(); await Task.Delay(300); var bw = Application.Current.Windows.OfType<BookmarkManager>().FirstOrDefault(); R("bookmark manager window", bw != null && bw.IsVisible);
             var dlgB = new BookmarkDialog(w, Store.D.Bookmarks.First(), false); dlgB.Show(); await Task.Delay(300); R("bookmark dialog opens", dlgB.IsVisible); dlgB.Close();
             { var tb64 = Convert.ToBase64String(Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")); var cb = Store.D.Bookmarks.First(); w.OnFavicon(w.Cur, tb64); cb.Icon = tb64; R("bookmark stores icon", cb.IconImage != null); }
@@ -159,18 +213,44 @@ static class SelfTest
             w.ToggleFullscreen(); R("fullscreen restore", w.Toolbar.Visibility == Visibility.Visible);
 
             // private window
-            int hc = Store.D.History.Count; w.OpenPrivateWindow(U("priv")); await Until(() => App.Windows.Count == 2); var pw = App.Windows[1];
+            int hc = Store.D.History.Count; w.OpenPrivateWindow(U("priv")); await Until(() => App.Browsers.Count == 2); var pw = App.Browsers[1];
             await Until(() => pw.Cur != null && pw.Cur.Title == "priv", 10000); R("private window tab private", pw.Cur != null && pw.Cur.Private && pw.Cur.Title == "priv", pw.Cur?.Title);
             R("private not in history", Store.D.History.Count == hc && !Store.D.History.Any(h => h.Url.EndsWith("/priv")));
             pw.Close();
 
             // new window shortcut
-            w.HandleShortcut(78, true, false, false); await Task.Delay(1500); R("ctrl+n new window", App.Windows.Count == 2); App.Windows.Last().Close();
+            w.HandleShortcut(78, true, false, false); await Task.Delay(1500); R("ctrl+n new window", App.Browsers.Count == 2); App.Browsers.Last().Close();
+
+            // ---- every window uses the dark theme (a light window with light text is unreadable)
+            { var bgOk = new Func<Window, bool>(x => x.Background is SolidColorBrush b && b.Color == Color.FromRgb(0x20, 0x21, 0x24) && x.Foreground is SolidColorBrush f && f.Color == Color.FromRgb(0xE8, 0xEA, 0xED));
+              w.ShowHistory(); w.ShowSettings(); w.ShowBookmarks(); w.ShowDownloads(); await Task.Delay(500);
+              var wins = Application.Current.Windows.OfType<Window>().Where(x => x is HistoryWindow or SettingsWindow or BookmarkManager or DownloadsWindow).ToList();
+              R("themed windows are dark", wins.Count == 4 && wins.All(bgOk), string.Join(", ", wins.Select(x => x.GetType().Name + ":" + x.Background)));
+              var bdlg = new BookmarkDialog(w, new Bookmark { Title = "t", Url = "http://x" }, false); var pr = new PromptWindow("t", "m", "d"); var au = new AuthWindow("site"); bdlg.Show(); pr.Show(); au.Show(); await Task.Delay(300);
+              R("dialogs are dark", bgOk(bdlg) && bgOk(pr) && bgOk(au), $"{bdlg.Background} {pr.Background} {au.Background}");
+              bdlg.Close(); pr.Close(); au.Close(); foreach (var x in wins.Where(x => x is not DownloadsWindow)) x.Close(); }
+
+            // ---- bookmark bar spacing: neighbouring items need breathing room
+            { var b1 = new Bookmark { Title = "First", Url = "http://a/" }; var b2 = new Bookmark { Title = "Second", Url = "http://b/" }; Store.D.Bookmarks.Add(b1); Store.D.Bookmarks.Add(b2); MainWindow.RefreshAll(); await Task.Delay(300);
+              var kids = w.BmPanel.Children.OfType<System.Windows.Controls.Button>().Where(x => BtnText(x) is "First" or "Second").ToList();
+              if (kids.Count == 2) { var l = kids[0].TranslatePoint(new Point(kids[0].ActualWidth, 0), w).X; var r = kids[1].TranslatePoint(new Point(0, 0), w).X; var textGap = (r + 8) - (l - 8); R("bookmark bar: items are spaced apart", r - l >= 4 && textGap >= 16, $"button gap={r - l:0.#}px, visible text gap={textGap:0.#}px"); } else R("bookmark bar: items are spaced apart", false, "buttons not found");
+              Store.D.Bookmarks.Remove(b1); Store.D.Bookmarks.Remove(b2); MainWindow.RefreshAll(); }
 
             // ---- custom title bar
             R("window chrome installed", System.Windows.Shell.WindowChrome.GetWindowChrome(w) != null && w.WindowStyle == WindowStyle.SingleBorderWindow);
-            Click(w.MaxBtn); await Task.Delay(500); R("maximize button", w.WindowState == WindowState.Maximized && w.MaxIcon.Kind == MaterialDesignThemes.Wpf.PackIconKind.WindowRestore && w.Padding.Left > 0, $"state={w.WindowState} pad={w.Padding.Left}");
-            Click(w.MaxBtn); await Task.Delay(500); R("restore button", w.WindowState == WindowState.Normal && w.Padding.Left == 0 && w.MaxIcon.Kind == MaterialDesignThemes.Wpf.PackIconKind.WindowMaximize);
+            { var first = w.TabList.ItemContainerGenerator.ContainerFromIndex(0) as FrameworkElement; var fx = first.TranslatePoint(new Point(0, 0), w).X; R("first tab has left margin", fx >= 8, $"x={fx:0.#} pad={w.Root.Margin.Left}"); }
+            // tab tint from icon colour
+            BitmapSource Solid(Color c) { var px = new byte[16 * 16 * 4]; for (int i = 0; i < px.Length; i += 4) { px[i] = c.B; px[i + 1] = c.G; px[i + 2] = c.R; px[i + 3] = 255; } return BitmapSource.Create(16, 16, 96, 96, PixelFormats.Bgra32, null, px, 64); }
+            var blue = Tab.DominantColor(Solid(Color.FromRgb(24, 119, 242))); R("tint: blue icon -> blue", blue is Color bc && bc.B > 200 && bc.R < 100, blue?.ToString());
+            var orange = Tab.DominantColor(Solid(Color.FromRgb(255, 120, 20))); R("tint: orange icon -> orange", orange is Color oc && oc.R > 200 && oc.B < 100, orange?.ToString());
+            R("tint: grey icon -> none", Tab.DominantColor(Solid(Color.FromRgb(128, 128, 128))) == null);
+            R("tint: black icon -> none", Tab.DominantColor(Solid(Color.FromRgb(5, 5, 5))) == null);
+            { var mixed = new byte[16 * 16 * 4]; for (int i = 0; i < mixed.Length; i += 4) { bool left = (i / 4) % 16 < 4; mixed[i] = (byte)(left ? 40 : 242); mixed[i + 1] = (byte)(left ? 180 : 119); mixed[i + 2] = (byte)(left ? 60 : 24); mixed[i + 3] = 255; } var big = Tab.DominantColor(BitmapSource.Create(16, 16, 96, 96, PixelFormats.Bgra32, null, mixed, 64)); R("tint: dominant hue wins", big is Color mc && mc.B > mc.G, big?.ToString()); }
+            var tintTab = w.Cur; tintTab.Tint = Color.FromRgb(24, 119, 242); R("tab tint brush", tintTab.TintBrush is SolidColorBrush sb && sb.Color.B == 242); tintTab.Favicon = null; R("tint cleared without icon", tintTab.Tint == null);
+            Click(w.MaxBtn); await Task.Delay(700); { var src = PresentationSource.FromVisual(w); double k = src.CompositionTarget.TransformToDevice.M11; var top = w.CloseBtn.PointToScreen(new Point(0, 0)); var ic = w.MaxIcon.PointToScreen(new Point(w.MaxIcon.ActualWidth / 2, w.MaxIcon.ActualHeight / 2)); var cl = w.CloseBtn.PointToScreen(new Point(w.CloseBtn.ActualWidth, 0)); R("maximized: caption buttons inside the screen", top.Y >= -0.5 && cl.X <= SystemParameters.PrimaryScreenWidth * k + 0.5, $"closeTop={top.Y:0.#}px iconCenterY={ic.Y:0.#}px right={cl.X:0.#}px scale={k}"); }
+            Click(w.MaxBtn); await Task.Delay(500); Click(w.MaxBtn); await Task.Delay(700);
+            R("maximize button", w.WindowState == WindowState.Maximized && w.MaxIcon.Kind == MaterialDesignThemes.Wpf.PackIconKind.WindowRestore && w.Root.Margin.Left >= 7 && w.Root.Margin.Top >= 7, $"state={w.WindowState} pad={w.Root.Margin.Left}");
+            Click(w.MaxBtn); await Task.Delay(500); R("restore button", w.WindowState == WindowState.Normal && w.Root.Margin.Left == 0 && w.MaxIcon.Kind == MaterialDesignThemes.Wpf.PackIconKind.WindowMaximize);
             Click(w.MinBtn); await Task.Delay(500); R("minimize button", w.WindowState == WindowState.Minimized); w.WindowState = WindowState.Normal; await Task.Delay(300);
 
             // ---- split view
@@ -189,15 +269,61 @@ static class SelfTest
             w.CloseTab(other); R("closing a split tab unpairs", t0.Partner == null);
             w.CloseTab(sp);
 
+            // ---- drag preview
+            { var a1 = w.NewTab(U("p1")); var a2 = w.NewTab(U("p2")); await Task.Delay(500); var c0 = (FrameworkElement)w.TabList.ItemContainerGenerator.ContainerFromIndex(0); double l0 = c0.TranslatePoint(new Point(0, 0), w.TabBar).X, w0 = c0.ActualWidth; int nT = w.Tabs.Count;
+              R("drop slot: left of first tab -> 0", w.InsertIndexAt(new Point(l0 + 2, 10)) == 0);
+              R("drop slot: right half of first tab -> 1", w.InsertIndexAt(new Point(l0 + w0 * 0.75, 10)) == 1);
+              R("drop slot: far right -> end", w.InsertIndexAt(new Point(w.TabBar.ActualWidth - 5, 10)) == nT, $"n={nT}");
+              w.ShowDropLine(0); R("insertion marker shows at first slot", w.DropLine.Visibility == Visibility.Visible && Math.Abs(w.DropLine.Margin.Left - (l0 - 3)) < 4, $"x={w.DropLine.Margin.Left:0.#} l0={l0:0.#}");
+              w.ShowDropLine(nT); var lastC = (FrameworkElement)w.TabList.ItemContainerGenerator.ContainerFromIndex(nT - 1); R("insertion marker at end is after last tab", w.DropLine.Margin.Left >= lastC.TranslatePoint(new Point(lastC.ActualWidth, 0), w.TabBar).X - 3);
+              w.DropLine.Visibility = Visibility.Collapsed;
+              var gh = new DragGhost(w.Cur); gh.Follow(false); gh.Show(); await Task.Delay(300); R("drag ghost opens, click-through", gh.IsVisible && !gh.IsActive); gh.Close();
+              w.CloseTab(a1); w.CloseTab(a2); }
+
             // ---- tab tear-off / move between windows
             var tA = w.NewTab(U("tearA")); await Until(() => tA.Title == "tearA");
-            int winsBefore = App.Windows.Count; var nw = w.TearOff(tA); await Task.Delay(1500);
-            R("tear-off opens new window", App.Windows.Count == winsBefore + 1 && !w.Tabs.Contains(tA) && nw.Tabs.Count == 1, $"wins={App.Windows.Count}");
+            int winsBefore = App.Browsers.Count; var nw = w.TearOff(tA); await Task.Delay(1500);
+            R("tear-off opens new window", App.Browsers.Count == winsBefore + 1 && !w.Tabs.Contains(tA) && nw.Tabs.Count == 1, $"wins={App.Browsers.Count}");
             R("tear-off keeps the page", await Until(() => nw.Cur != null && nw.Cur.Title == "tearA", 8000), nw.Cur?.Title);
             var tB = w.NewTab(U("moveB")); await Until(() => tB.Title == "moveB");
             var moved = nw.AcceptTab(tB); R("tab accepted by other window", tB.MovedTo == nw && nw.Tabs.Count == 2 && await Until(() => moved.Title == "moveB", 8000), moved.Title);
             w.CloseTab(tB); R("source closes moved tab", !w.Tabs.Contains(tB));
             nw.Close(); await Task.Delay(300);
+
+            // ---- auto update
+            R("update: version comparison", Updater.TryParseVersion("v1.2.3", out var v123) && v123 == new Version(1, 2, 3, 0) && Updater.TryParseVersion("2.0", out var v20) && v20 > v123 && Updater.TryParseVersion("1.0.10", out var v110) && v110 > new Version(1, 0, 9, 0) && !Updater.TryParseVersion("nightly", out _));
+            R("update: newer/older/equal", Updater.IsNewer(new Version(Updater.Current.Major, Updater.Current.Minor, Updater.Current.Build + 1, 0)) && !Updater.IsNewer(new Version(Updater.Current.Major, Updater.Current.Minor, Math.Max(0, Updater.Current.Build), 0)) && !Updater.IsNewer(new Version(0, 9, 0, 0)));
+            Updater.AllowInsecureForTests = true; Updater.ApiBase = $"http://localhost:{port}/updapi";
+            FakeZip = MakeZip(("Orbit/Orbit.exe", "NEW-EXE"), ("Orbit/Orbit.dll", "NEW-DLL"), ("Orbit/sub/added.txt", "added")); FakeJson = Release("v99.1.0", FakeZip, port);
+            var rel = await Updater.FetchLatestAsync(); R("update: reads latest release from GitHub-style API", rel != null && rel.Version == new Version(99, 1, 0, 0) && rel.AssetUrl.EndsWith("Orbit-win-x64.zip") && rel.Sha256.Length == 64 && rel.PageUrl != "", rel?.Tag);
+            var prog = new List<double>(); var staged = await Updater.DownloadAndStageAsync(rel, p => prog.Add(p));
+            R("update: download verified and staged", staged.Version == "99.1.0" && File.Exists(Path.Combine(staged.Dir, "Orbit.exe")) && File.Exists(Path.Combine(staged.Dir, "sub", "added.txt")) && Updater.Staged() != null, staged.Dir);
+            FakeJson = Release("v99.2.0", FakeZip, port, new string('0', 64)); var rel2 = await Updater.FetchLatestAsync(); bool rejected = false; try { await Updater.DownloadAndStageAsync(rel2); } catch (InvalidDataException) { rejected = true; }
+            R("update: wrong checksum is rejected", rejected && !Directory.Exists(Path.Combine(Updater.WorkDir, "99.2.0")));
+            FakeJson = Release("v99.3.0", FakeZip, port).Replace("sha256:", "md5:"); var rel3 = await Updater.FetchLatestAsync(); bool noSum = false; try { await Updater.DownloadAndStageAsync(rel3); } catch (InvalidOperationException) { noSum = true; }
+            R("update: refuses a release with no SHA-256", noSum);
+            FakeZip = MakeZip(("Orbit/Orbit.exe", "x"), ("../evil.txt", "evil")); FakeJson = Release("v99.4.0", FakeZip, port); bool slip = false; try { await Updater.DownloadAndStageAsync(await Updater.FetchLatestAsync()); } catch (InvalidDataException) { slip = true; }
+            R("update: zip with path traversal is rejected", slip && !File.Exists(Path.Combine(Updater.WorkDir, "99.4.0", "evil.txt")));
+            FakeZip = MakeZip(("Orbit/readme.txt", "no exe here")); FakeJson = Release("v99.5.0", FakeZip, port); bool noExe = false; try { await Updater.DownloadAndStageAsync(await Updater.FetchLatestAsync()); } catch (InvalidDataException) { noExe = true; }
+            R("update: zip without Orbit.exe is rejected", noExe);
+            // apply: run the real install script against a throwaway "install" folder
+            { var inst = Path.Combine(Path.GetTempPath(), "orbit-install-test"); try { Directory.Delete(inst, true); } catch { } Directory.CreateDirectory(inst); File.WriteAllText(Path.Combine(inst, "Orbit.exe"), "OLD-EXE"); File.WriteAllText(Path.Combine(inst, "Orbit.dll"), "OLD-DLL"); File.WriteAllText(Path.Combine(inst, "keep.txt"), "mine");
+              var sf = Path.Combine(Updater.WorkDir, "staged.json"); R("update: staged file exists before install", File.Exists(sf));
+              var script = Path.Combine(Updater.WorkDir, "apply-test.cmd"); File.WriteAllText(script, Updater.BuildScript(2147483, staged.Dir, inst, sf, Updater.WorkDir, Path.Combine(Updater.WorkDir, staged.Version), false));
+              var pr = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c \"{script}\"") { CreateNoWindow = true, UseShellExecute = false }); await pr.WaitForExitAsync();
+              R("update: install script replaces files", File.ReadAllText(Path.Combine(inst, "Orbit.exe")) == "NEW-EXE" && File.ReadAllText(Path.Combine(inst, "Orbit.dll")) == "NEW-DLL" && File.Exists(Path.Combine(inst, "sub", "added.txt")), $"exit={pr.ExitCode}");
+              R("update: install keeps the user's other files", File.ReadAllText(Path.Combine(inst, "keep.txt")) == "mine");
+              R("update: staged update is forgotten after install", !File.Exists(sf) && !Directory.Exists(Path.Combine(Updater.WorkDir, staged.Version)));
+              try { Directory.Delete(inst, true); } catch { } }
+            R("update: install folder write check", Updater.CanWriteInstall(Path.GetTempPath()) && !Updater.CanWriteInstall(@"C:\Windows\System32"));
+            // banner reacts to state
+            FakeZip = MakeZip(("Orbit/Orbit.exe", "NEW")); FakeJson = Release("v99.6.0", FakeZip, port); Store.D.Settings.AutoUpdate = true;
+            await Updater.CheckAsync(download: true); await Task.Delay(300);
+            R("update: check downloads and shows the restart banner", Updater.Phase == UpdatePhase.Ready && w.UpdateBar.Visibility == Visibility.Visible && w.UpdText.Text.Contains("99.6.0") && w.UpdNow.Content.ToString().Contains("Restart"), $"{Updater.Phase} / {w.UpdText.Text}");
+            FakeJson = "{\"tag_name\":\"v0.0.1\",\"assets\":[]}"; await Updater.CheckAsync(download: true); R("update: no usable release -> up to date", Updater.Phase == UpdatePhase.UpToDate);
+            FakeJson = null; await Updater.CheckAsync(download: true); R("update: broken response -> failure reported, no crash", Updater.Phase == UpdatePhase.Failed, Updater.Message);
+            Updater.DiscardStaged(); Updater.ApiBase = "https://api.github.com/repos/MykePalma/OrbitBrowser"; Updater.AllowInsecureForTests = false;
+            try { var real = await Updater.FetchLatestAsync(); R("update: real GitHub release is readable", real != null && real.Sha256.Length == 64 && real.AssetUrl.StartsWith("https://github.com/"), real?.Tag); } catch (Exception ex) { log.Add("INFO update: real GitHub unreachable (" + ex.GetType().Name + ")"); }
 
             // auth dialog
             w.NewTab(U("auth")); var aw = await Until(() => Application.Current.Windows.OfType<AuthWindow>().Any(), 6000); R("basic auth dialog", aw); foreach (var x in Application.Current.Windows.OfType<AuthWindow>().ToList()) x.DialogResult = false;

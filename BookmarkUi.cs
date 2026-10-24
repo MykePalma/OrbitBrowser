@@ -6,42 +6,56 @@ using System.Windows.Media;
 
 namespace Lite;
 
-/// <summary>Add/edit one bookmark: name, address, folder (with "New folder…").</summary>
-public class BookmarkDialog : Window
+/// <summary>Add/edit one bookmark: name, address and a folder picked from a short list.</summary>
+public class BookmarkDialog : ThemedWindow
 {
     readonly Bookmark bm; readonly MainWindow main;
-    readonly TextBox name, url; readonly ComboBox folder = new() { Margin = new Thickness(4) };
+    readonly TextBox name, url;
+    readonly ListBox folder = new() { Background = Brushes.Transparent, BorderThickness = new Thickness(0), ItemContainerStyle = K.S("Row"), MaxHeight = 168, Margin = new Thickness(4) };
     List<string> paths = new();
 
     public BookmarkDialog(MainWindow owner, Bookmark b, bool isNew)
     {
         bm = b; main = owner;
-        Title = isNew ? "Bookmark added" : "Edit bookmark"; Width = 420; Height = 300; ResizeMode = ResizeMode.NoResize;
-        Background = K.B("Bg"); Foreground = K.B("Fg"); Owner = owner; WindowStartupLocation = WindowStartupLocation.CenterOwner; FontSize = 14;
-        var s = new StackPanel { Margin = new Thickness(14) };
-        s.Children.Add(new TextBlock { Text = "Name" }); name = K.Box(b.Title); s.Children.Add(name);
-        s.Children.Add(new TextBlock { Text = "Address" }); url = K.Box(b.Url); s.Children.Add(url);
-        s.Children.Add(new TextBlock { Text = "Folder" });
-        var row = new DockPanel();
-        var nf = K.Btn("New folder…", (_, _) =>
-        {
-            var parent = Selected(); var n = main.AskFolderName("New folder"); if (string.IsNullOrEmpty(n)) return;
-            Fill(Store.AddFolder(parent, n));
-        });
-        DockPanel.SetDock(nf, Dock.Right); row.Children.Add(nf); row.Children.Add(folder); s.Children.Add(row);
-        var btns = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
-        btns.Children.Add(K.Btn("Remove", (_, _) => { Store.D.Bookmarks.Remove(bm); Store.Save(); DialogResult = false; }));
-        var done = K.Btn("Done", (_, _) => Apply()); done.IsDefault = true; btns.Children.Add(done);
-        s.Children.Add(btns); Content = s;
+        Title = isNew ? "Bookmark added" : "Edit bookmark"; Width = 440; SizeToContent = SizeToContent.Height; ResizeMode = ResizeMode.NoResize;
+        Owner = owner; WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        var s = new StackPanel { Margin = new Thickness(24) };
+        var head = new StackPanel { Orientation = Orientation.Horizontal };
+        head.Children.Add(new MaterialDesignThemes.Wpf.PackIcon { Kind = isNew ? MaterialDesignThemes.Wpf.PackIconKind.BookmarkCheckOutline : MaterialDesignThemes.Wpf.PackIconKind.BookmarkOutline, Width = 24, Height = 24, Foreground = K.B("Acc"), Margin = new Thickness(0, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center });
+        head.Children.Add(new TextBlock { Text = isNew ? "Bookmark added" : "Edit bookmark", Style = K.S("TextSubtitle"), VerticalAlignment = VerticalAlignment.Center });
+        s.Children.Add(head);
+        s.Children.Add(K.Label("Name")); name = K.Box(b.Title); s.Children.Add(name);
+        s.Children.Add(K.Label("Address")); url = K.Box(b.Url); s.Children.Add(url);
+        s.Children.Add(K.Label("Folder"));
+        s.Children.Add(new Border { Style = K.S("Card"), Child = folder });
+        var nf = new Button { Style = K.S("BtnGhost"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(-8, 8, 0, 0), Padding = new Thickness(8, 0, 12, 0) };
+        { var sp = new StackPanel { Orientation = Orientation.Horizontal }; sp.Children.Add(new MaterialDesignThemes.Wpf.PackIcon { Kind = MaterialDesignThemes.Wpf.PackIconKind.FolderPlusOutline, Width = 18, Height = 18, VerticalAlignment = VerticalAlignment.Center }); sp.Children.Add(new TextBlock { Text = "New folder…", Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center }); nf.Content = sp; }
+        nf.Click += (_, _) => { var parent = Selected(); var n = main.AskFolderName("New folder"); if (string.IsNullOrEmpty(n)) return; Fill(Store.AddFolder(parent, n)); };
+        s.Children.Add(nf);
+        var remove = new Button { Content = "Remove bookmark", Style = K.S("BtnDangerGhost") };
+        remove.Click += (_, _) => { Store.D.Bookmarks.Remove(bm); Store.Save(); DialogResult = false; };
+        var done = K.Btn("Done", (_, _) => Apply(), primary: true); done.IsDefault = true;
+        var row = new DockPanel { Margin = new Thickness(0, 24, 0, 0) };
+        DockPanel.SetDock(remove, Dock.Left); row.Children.Add(remove);
+        var right = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right }; right.Children.Add(done); row.Children.Add(right);
+        s.Children.Add(row); Content = s;
         Fill(b.Folder);
         Loaded += (_, _) => { name.Focus(); name.SelectAll(); };
     }
     string Selected() => folder.SelectedIndex >= 0 && folder.SelectedIndex < paths.Count ? paths[folder.SelectedIndex] : "";
     void Fill(string select)
     {
-        paths = new List<string> { "" }; folder.Items.Clear(); folder.Items.Add("📁 Bookmarks bar");
-        foreach (var f in Store.FoldersSorted()) { paths.Add(f); folder.Items.Add(new string(' ', 4 * f.Count(c => c == '/')) + "📁 " + Store.LeafName(f)); }
+        paths = new List<string> { "" }; folder.Items.Clear(); folder.Items.Add(FolderRow("Bookmarks bar", 0));
+        foreach (var f in Store.FoldersSorted()) { paths.Add(f); folder.Items.Add(FolderRow(Store.LeafName(f), f.Count(c => c == '/') + 1)); }
         folder.SelectedIndex = Math.Max(0, paths.IndexOf(select ?? ""));
+        folder.ScrollIntoView(folder.SelectedItem);
+    }
+    static UIElement FolderRow(string text, int depth)
+    {
+        var sp = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(8 + 16 * depth, 0, 8, 0), Height = 32 };
+        sp.Children.Add(new MaterialDesignThemes.Wpf.PackIcon { Kind = MaterialDesignThemes.Wpf.PackIconKind.FolderOutline, Width = 18, Height = 18, Margin = new Thickness(0, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = K.B("Mut") });
+        sp.Children.Add(new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center, Style = K.S("TextBody") });
+        return sp;
     }
     void Apply()
     {
@@ -53,28 +67,51 @@ public class BookmarkDialog : Window
 }
 
 /// <summary>Tree view of all bookmarks and folders: rename, delete, drag to move, import/export.</summary>
-public class BookmarkManager : Window
+public class BookmarkManager : ThemedWindow
 {
     readonly MainWindow main;
-    readonly TreeView tree = new() { Background = K.B("Bg"), Foreground = K.B("Fg"), BorderThickness = new Thickness(0) };
-    readonly TextBox search = K.Box();
+    readonly TreeView tree = new() { Background = Brushes.Transparent, BorderThickness = new Thickness(0), Margin = new Thickness(16, 0, 8, 0) };
+    readonly TextBox search = new() { Style = K.S("FieldBare") };
+    readonly TextBlock searchHint = new() { Text = "Search bookmarks", Style = K.S("TextCaption"), FontSize = 14, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false, TextWrapping = TextWrapping.NoWrap };
+    readonly StackPanel empty = new() { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MaxWidth = 340, Visibility = Visibility.Collapsed };
     Point dragStart; object dragItem;
 
     public BookmarkManager(MainWindow owner)
     {
-        main = owner; Title = "Bookmarks"; Width = 760; Height = 560; Background = K.B("Bg"); Foreground = K.B("Fg"); Owner = owner; WindowStartupLocation = WindowStartupLocation.CenterOwner; FontSize = 14;
-        var bar = new WrapPanel { Margin = new Thickness(4) };
-        bar.Children.Add(K.Btn("New folder", (_, _) => { main.NewFolderPrompt(SelFolderForNew()); Fill(); }));
-        bar.Children.Add(K.Btn("Open", (_, _) => OpenSel(true)));
-        bar.Children.Add(K.Btn("Open in new tab", (_, _) => OpenSel(false)));
-        bar.Children.Add(K.Btn("Rename / Edit", (_, _) => EditSel()));
-        bar.Children.Add(K.Btn("Delete", (_, _) => DeleteSel()));
-        bar.Children.Add(K.Btn("Export HTML", (_, _) => Export()));
-        bar.Children.Add(K.Btn("Import HTML", (_, _) => Import()));
-        var top = new StackPanel(); top.Children.Add(search); top.Children.Add(bar);
-        top.Children.Add(new TextBlock { Text = "Drag bookmarks and folders onto a folder to move them. Right-click for more.", Foreground = K.B("Mut"), FontSize = 12, Margin = new Thickness(8, 0, 8, 6) });
-        var d = new DockPanel(); DockPanel.SetDock(top, Dock.Top); d.Children.Add(top); d.Children.Add(tree); Content = d;
+        main = owner; Title = "Bookmarks"; Width = 800; Height = 620; MinWidth = 520; MinHeight = 380; Owner = owner; WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        Button Ghost(string text, MaterialDesignThemes.Wpf.PackIconKind icon, RoutedEventHandler click)
+        {
+            var sp = new StackPanel { Orientation = Orientation.Horizontal };
+            sp.Children.Add(new MaterialDesignThemes.Wpf.PackIcon { Kind = icon, Width = 18, Height = 18, VerticalAlignment = VerticalAlignment.Center });
+            sp.Children.Add(new TextBlock { Text = text, Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
+            var btn = new Button { Content = sp, Style = K.S("BtnGhost"), Margin = new Thickness(4, 0, 0, 0) }; btn.Click += click; return btn;
+        }
+        var header = new DockPanel { Margin = new Thickness(24, 24, 24, 16) };
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        actions.Children.Add(Ghost("New folder", MaterialDesignThemes.Wpf.PackIconKind.FolderPlusOutline, (_, _) => { main.NewFolderPrompt(SelFolderForNew()); Fill(); }));
+        actions.Children.Add(Ghost("Import", MaterialDesignThemes.Wpf.PackIconKind.Import, (_, _) => Import()));
+        actions.Children.Add(Ghost("Export", MaterialDesignThemes.Wpf.PackIconKind.Export, (_, _) => Export()));
+        DockPanel.SetDock(actions, Dock.Right); header.Children.Add(actions);
+        header.Children.Add(new TextBlock { Text = "Bookmarks", Style = K.S("TextTitle"), VerticalAlignment = VerticalAlignment.Center });
 
+        var sbox = new Grid(); sbox.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); sbox.ColumnDefinitions.Add(new ColumnDefinition());
+        sbox.Children.Add(new MaterialDesignThemes.Wpf.PackIcon { Kind = MaterialDesignThemes.Wpf.PackIconKind.Magnify, Width = 18, Height = 18, Margin = new Thickness(12, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = K.B("Mut") });
+        Grid.SetColumn(search, 1); Grid.SetColumn(searchHint, 1); sbox.Children.Add(search); sbox.Children.Add(searchHint);
+        System.Windows.Automation.AutomationProperties.SetName(search, "Search bookmarks");
+        var searchBorder = new Border { Style = K.S("SearchBox"), Margin = new Thickness(24, 0, 24, 12), Child = sbox };
+
+        var hint = new Border { BorderBrush = K.B("Outline"), BorderThickness = new Thickness(0, 1, 0, 0), Padding = new Thickness(24, 10, 24, 10), Child = new TextBlock { Text = "Drag a bookmark or folder onto a folder to move it · Right-click for more · Delete removes the selection", Style = K.S("TextCaption") } };
+        var grid = new Grid(); grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); grid.RowDefinitions.Add(new RowDefinition()); grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var body = new Grid(); body.Children.Add(tree); body.Children.Add(empty);
+        empty.Children.Add(new MaterialDesignThemes.Wpf.PackIcon { Kind = MaterialDesignThemes.Wpf.PackIconKind.BookmarkOffOutline, Width = 48, Height = 48, Foreground = K.B("Mut"), HorizontalAlignment = HorizontalAlignment.Center });
+        empty.Children.Add(new TextBlock { Text = "No bookmarks yet", Style = K.S("TextSubtitle"), TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 16, 0, 0) });
+        empty.Children.Add(new TextBlock { Text = "Press Ctrl+D on any page to bookmark it, or import bookmarks from another browser.", Style = K.S("TextCaption"), FontSize = 14, TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 8, 0, 16) });
+        var imp = new Button { Content = "Import bookmarks…", Style = K.S("Btn"), HorizontalAlignment = HorizontalAlignment.Center }; imp.Click += (_, _) => Import(); empty.Children.Add(imp);
+        Grid.SetRow(header, 0); Grid.SetRow(searchBorder, 1); Grid.SetRow(body, 2); Grid.SetRow(hint, 3);
+        grid.Children.Add(header); grid.Children.Add(searchBorder); grid.Children.Add(body); grid.Children.Add(hint);
+        Content = grid;
+
+        search.TextChanged += (_, _) => { searchHint.Visibility = search.Text == "" ? Visibility.Visible : Visibility.Collapsed; };
         search.TextChanged += (_, _) => Fill();
         tree.MouseDoubleClick += (_, _) => { if (Sel is Bookmark) OpenSel(true); };
         tree.KeyDown += (_, e) => { if (e.Key == Key.Delete) DeleteSel(); else if (e.Key == Key.Enter) OpenSel(true); else if (e.Key == Key.F2) EditSel(); };
@@ -128,6 +165,8 @@ public class BookmarkManager : Window
         else AddChildren(root, "");
         tree.Items.Add(root);
         if (sel != null) Reselect(root, sel);
+        bool none = Store.D.Bookmarks.Count == 0 && Store.D.Folders.Count == 0;
+        empty.Visibility = none ? Visibility.Visible : Visibility.Collapsed; tree.Visibility = none ? Visibility.Collapsed : Visibility.Visible;
     }
     void AddChildren(TreeViewItem parent, string folder)
     {

@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using CefSharp;
+using MaterialDesignThemes.Wpf;
 using CefSharp.Wpf.HwndHost;
 
 namespace Lite;
@@ -44,6 +45,9 @@ public class Settings
     public bool DarkPages { get; set; }
     public bool AskDownload { get; set; }
     public bool BookmarksBar { get; set; } = true;
+    /// <summary>Look for a newer Orbit on GitHub at start-up, download it in the background and install it on the next restart.</summary>
+    public bool AutoUpdate { get; set; } = true;
+    public DateTime LastUpdateCheckUtc { get; set; }
     public string DownloadDir { get; set; } = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + "\\Downloads";
 }
 
@@ -60,8 +64,11 @@ public static class Store
 {
     /// <summary>Automated test runs (--selftest*) use a throwaway folder so they never touch the real profile.</summary>
     static readonly bool TestRun = Environment.GetCommandLineArgs().Any(x => x.StartsWith("--selftest"));
+    public static bool IsTestRun => TestRun;
+    /// <summary>ORBIT_DATA_DIR relocates the whole profile (handy for portable use and for testing updates without touching the real one).</summary>
     public static readonly string Dir = TestRun
         ? Path.Combine(Path.GetTempPath(), "Orbit-selftest")
+        : Environment.GetEnvironmentVariable("ORBIT_DATA_DIR") is { Length: > 0 } custom ? custom
         : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Orbit");
     static readonly string LegacyDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LiteBrowser");
     static string File_ => Path.Combine(Dir, "data.json");
@@ -169,11 +176,11 @@ public static class Store
         var tiles = string.Concat(sites.Select(s => { var h = new Uri(s).Host.Replace("www.", ""); return $"<a href='{s}'><b>{char.ToUpper(h[0])}</b>{h}</a>"; }));
         var engine = D.Settings.Engine.Replace("\\", "\\\\").Replace("'", "\\'");
         var html = $@"<!doctype html><meta charset=utf8><title>New Tab</title><link rel=icon href='data:image/svg+xml,{FaviconSvg}'><style>
-:root{{color-scheme:dark light}}body{{margin:0;background:#202124;color:#e8eaed;font:15px system-ui,sans-serif;text-align:center;padding-top:16vh}}
+:root{{color-scheme:dark light}}body{{margin:0;background:#202124;color:#e8eaed;font:16px/1.5 'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif;text-align:center;padding-top:16vh}}
 @media(prefers-color-scheme:light){{body{{background:#fff;color:#202124}}}}
-h1{{font-weight:300;font-size:46px;margin:0 0 26px;display:flex;align-items:center;justify-content:center;gap:14px}}h1 svg{{width:54px;height:54px}}input{{width:min(560px,86vw);padding:13px 20px;border-radius:26px;border:1px solid #8886;background:#8883;color:inherit;font:inherit;outline:0}}
-input:focus{{border-color:#8ab4f8}}#g{{display:grid;grid-template-columns:repeat(auto-fill,110px);gap:14px;justify-content:center;margin:40px auto 0;max-width:640px}}
-a{{background:#8882;border-radius:12px;padding:14px 6px;color:inherit;text-decoration:none;font-size:12px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}}a:hover{{background:#8884}}
+h1{{font-weight:300;font-size:46px;margin:0 0 26px;display:flex;align-items:center;justify-content:center;gap:14px}}h1 svg{{width:54px;height:54px}}input{{width:min(560px,86vw);height:48px;box-sizing:border-box;padding:0 24px;border-radius:26px;border:1px solid #8886;background:#8883;color:inherit;font:inherit;outline:0}}
+input::placeholder{{color:#9aa0a6;opacity:1}}input:focus-visible{{outline:2px solid #8ab4f8;outline-offset:2px;border-color:#8ab4f8}}a:focus-visible{{outline:2px solid #8ab4f8;outline-offset:2px}}@media(prefers-reduced-motion:reduce){{*{{transition:none!important;animation:none!important}}}}#g{{display:grid;grid-template-columns:repeat(auto-fill,110px);gap:14px;justify-content:center;margin:40px auto 0;max-width:640px}}
+a{{background:#8882;border-radius:12px;padding:16px 8px;color:inherit;text-decoration:none;font-size:13px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}}a:hover{{background:#8884}}
 b{{display:block;font-size:22px;margin-bottom:6px;color:#8ab4f8}}</style>
 <h1>{LogoSvg}Orbit</h1><form id=f><input id=q autofocus placeholder='Search the web or enter an address' autocomplete=off></form><div id=g>{tiles}</div>
 <script>f.onsubmit=e=>{{e.preventDefault();var v=q.value.trim();if(!v)return;location.href=/^https?:\/\//i.test(v)?v:/^[^\s\/]+\.[a-z]{{2,}}(\/\S*)?$/i.test(v)?'https://'+v:'{engine}'.replace('%s',encodeURIComponent(v))}}</script>";
@@ -200,7 +207,36 @@ public class Tab : INotifyPropertyChanged
     string title = "New Tab"; public string Title { get => title; set { title = string.IsNullOrWhiteSpace(value) ? "New Tab" : value; P(); } }
     string url = ""; public string Url { get => url; set { url = value ?? ""; P(); } }
     bool loading; public bool Loading { get => loading; set { loading = value; Pn(nameof(Loading), nameof(Glyph), nameof(FavVis), nameof(GlyphVis)); } }
-    ImageSource fav; public ImageSource Favicon { get => fav; set { fav = value; Pn(nameof(Favicon), nameof(FavVis), nameof(GlyphVis)); } }
+    ImageSource fav; public ImageSource Favicon { get => fav; set { fav = value; if (value == null) Tint = null; Pn(nameof(Favicon), nameof(FavVis), nameof(GlyphVis)); } }
+    /// <summary>Dominant colour of the site icon, used to tint the tab; null when there is no icon or it has no clear colour.</summary>
+    Color? tint; public Color? Tint { get => tint; set { tint = value; P(nameof(TintBrush)); } }
+    public Brush TintBrush => tint is Color c ? new SolidColorBrush(c) : Brushes.Transparent;
+
+    /// <summary>Picks the strongest hue in the icon (weighted by saturation, brightness and opacity) and returns a lifted version of it.</summary>
+    public static Color? DominantColor(BitmapSource src)
+    {
+        try
+        {
+            var bmp = new FormatConvertedBitmap(src, PixelFormats.Bgra32, null, 0);
+            int w = bmp.PixelWidth, h = bmp.PixelHeight, stride = w * 4; var px = new byte[stride * h]; bmp.CopyPixels(px, stride, 0);
+            const int Bins = 12; var weight = new double[Bins]; var sr = new double[Bins]; var sg = new double[Bins]; var sb = new double[Bins];
+            for (int i = 0; i < px.Length; i += 4)
+            {
+                double a = px[i + 3] / 255.0, b = px[i] / 255.0, g = px[i + 1] / 255.0, r = px[i + 2] / 255.0;
+                double max = Math.Max(r, Math.Max(g, b)), min = Math.Min(r, Math.Min(g, b)), d = max - min;
+                if (a < 0.5 || max < 0.25 || d < 0.2) continue;                 // transparent, near-black or grey/white: no colour information
+                double sat = d / max, hue = max == r ? ((g - b) / d + 6) % 6 : max == g ? (b - r) / d + 2 : (r - g) / d + 4;
+                int bin = (int)(hue / 6 * Bins) % Bins; double wt = a * sat * max;
+                weight[bin] += wt; sr[bin] += r * wt; sg[bin] += g * wt; sb[bin] += b * wt;
+            }
+            int best = 0; for (int i = 1; i < Bins; i++) if (weight[i] > weight[best]) best = i;
+            if (weight[best] < 1.0) return null;
+            double R = sr[best] / weight[best], G = sg[best] / weight[best], B = sb[best] / weight[best];
+            double mx = Math.Max(R, Math.Max(G, B)); if (mx > 0 && mx < 0.8) { double k = 0.8 / mx; R = Math.Min(1, R * k); G = Math.Min(1, G * k); B = Math.Min(1, B * k); }
+            return Color.FromRgb((byte)(R * 255), (byte)(G * 255), (byte)(B * 255));
+        }
+        catch { return null; }
+    }
     bool pinned; public bool Pinned { get => pinned; set { pinned = value; Pn(nameof(Pinned), nameof(TitleVis), nameof(CloseVis), nameof(TabWidth)); } }
     bool muted; public bool Muted { get => muted; set { muted = value; Pn(nameof(Muted), nameof(MuteVis), nameof(MuteGlyph)); } }
     bool canBack, canFwd; public bool CanBack { get => canBack; set { canBack = value; P(); } } public bool CanFwd { get => canFwd; set { canFwd = value; P(); } }
@@ -229,7 +265,7 @@ public class Tab : INotifyPropertyChanged
             var enc = new PngBitmapEncoder(); enc.Frames.Add(frame);
             using var ms = new MemoryStream(); enc.Save(ms);
             FaviconB64 = Convert.ToBase64String(ms.ToArray());
-            Favicon = bi; done?.Invoke(FaviconB64);
+            Favicon = bi; Tint = DominantColor(frame); done?.Invoke(FaviconB64);
         }
         catch { Favicon = null; FaviconB64 = ""; }
     }
@@ -241,15 +277,28 @@ public class DownloadEntry : INotifyPropertyChanged
     void P([CallerMemberName] string n = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
     public int Id; public string Url = "";
     public IDownloadItemCallback Callback;
-    string name = ""; public string Name { get => name; set { name = value; P(); } }
+    string name = ""; public string Name { get => name; set { name = value; P(); P(nameof(FileKind)); } }
     string path = ""; public string Path { get => path; set { path = value; P(); } }
-    long rec, tot; double pct; string state = "Starting…"; bool done, canceled, paused;
+    long rec, tot; double pct; bool done, canceled, paused;
     public long Received { get => rec; set { rec = value; P(); P(nameof(Status)); } }
     public long Total { get => tot; set { tot = value; P(); P(nameof(Status)); } }
     public double Percent { get => pct; set { pct = value; P(); } }
-    public bool Done { get => done; set { done = value; P(); P(nameof(Status)); } }
-    public bool Canceled { get => canceled; set { canceled = value; P(); P(nameof(Status)); } }
-    public bool Paused { get => paused; set { paused = value; P(); P(nameof(Status)); } }
+    public bool Done { get => done; set { done = value; P(); P(nameof(Status)); StateChanged(); } }
+    public bool Canceled { get => canceled; set { canceled = value; P(); P(nameof(Status)); StateChanged(); } }
+    public bool Paused { get => paused; set { paused = value; P(); P(nameof(Status)); P(nameof(PauseKind)); } }
+    void StateChanged() { P(nameof(Active)); P(nameof(Finished)); P(nameof(Inactive)); }
+    public bool Active => !Done && !Canceled;
+    public bool Finished => Done && !Canceled;
+    public bool Inactive => !Active;
+    public PackIconKind PauseKind => Paused ? PackIconKind.Play : PackIconKind.Pause;
+    public PackIconKind FileKind => System.IO.Path.GetExtension(Name ?? "").ToLowerInvariant() switch
+    {
+        ".pdf" => PackIconKind.FilePdfBox, ".zip" or ".7z" or ".rar" or ".gz" or ".tar" => PackIconKind.FolderZipOutline,
+        ".png" or ".jpg" or ".jpeg" or ".gif" or ".webp" or ".svg" or ".bmp" => PackIconKind.FileImageOutline,
+        ".mp4" or ".mkv" or ".webm" or ".mov" or ".avi" => PackIconKind.FileVideoOutline, ".mp3" or ".wav" or ".flac" or ".ogg" or ".m4a" => PackIconKind.FileMusicOutline,
+        ".doc" or ".docx" or ".txt" or ".rtf" or ".odt" => PackIconKind.FileDocumentOutline, ".xls" or ".xlsx" or ".csv" => PackIconKind.FileExcelOutline,
+        ".exe" or ".msi" => PackIconKind.ApplicationOutline, _ => PackIconKind.FileOutline
+    };
     static string Mb(long n) => (n / 1048576.0).ToString("0.0") + " MB";
     public string Status => Canceled ? "Canceled" : Done ? "Completed · " + Mb(Total > 0 ? Total : Received) : Paused ? "Paused" : Total > 0 ? $"{Percent:0}% of {Mb(Total)}" : Mb(Received);
 }

@@ -1,0 +1,188 @@
+<local:ThemedWindow x:Class="Lite.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:md="http://materialdesigninxaml.net/winfx/xaml/themes"
+        xmlns:local="clr-namespace:Lite"
+        Title="Settings" Width="920" Height="680" MinWidth="720" MinHeight="480" WindowStartupLocation="CenterOwner">
+    <Grid>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="232"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+
+        <!-- side navigation: one category at a time keeps each page short (Hick's law) -->
+        <Border Background="{StaticResource TabBg}" BorderBrush="{StaticResource Outline}" BorderThickness="0,0,1,0">
+            <DockPanel Margin="16,24,16,16">
+                <TextBlock DockPanel.Dock="Top" Text="Settings" Style="{StaticResource TextSubtitle}" Margin="8,0,0,16"/>
+                <ListBox x:Name="Nav" Background="Transparent" BorderThickness="0" SelectionChanged="Nav_Changed" ItemContainerStyle="{StaticResource Row}" KeyboardNavigation.DirectionalNavigation="Cycle">
+                    <ListBoxItem Tag="General" Height="40"><StackPanel Orientation="Horizontal" Margin="12,0"><md:PackIcon Kind="CogOutline" Width="20" Height="20" VerticalAlignment="Center"/><TextBlock Text="General" Margin="12,0,0,0" VerticalAlignment="Center"/></StackPanel></ListBoxItem>
+                    <ListBoxItem Tag="Appearance" Height="40"><StackPanel Orientation="Horizontal" Margin="12,0"><md:PackIcon Kind="PaletteOutline" Width="20" Height="20" VerticalAlignment="Center"/><TextBlock Text="Appearance" Margin="12,0,0,0" VerticalAlignment="Center"/></StackPanel></ListBoxItem>
+                    <ListBoxItem Tag="Privacy" Height="40"><StackPanel Orientation="Horizontal" Margin="12,0"><md:PackIcon Kind="ShieldLockOutline" Width="20" Height="20" VerticalAlignment="Center"/><TextBlock Text="Privacy and security" Margin="12,0,0,0" VerticalAlignment="Center"/></StackPanel></ListBoxItem>
+                    <ListBoxItem Tag="Downloads" Height="40"><StackPanel Orientation="Horizontal" Margin="12,0"><md:PackIcon Kind="TrayArrowDown" Width="20" Height="20" VerticalAlignment="Center"/><TextBlock Text="Downloads" Margin="12,0,0,0" VerticalAlignment="Center"/></StackPanel></ListBoxItem>
+                    <ListBoxItem Tag="Updates" Height="40"><StackPanel Orientation="Horizontal" Margin="12,0"><md:PackIcon Kind="Update" Width="20" Height="20" VerticalAlignment="Center"/><TextBlock Text="Updates" Margin="12,0,0,0" VerticalAlignment="Center"/></StackPanel></ListBoxItem>
+                    <ListBoxItem Tag="About" Height="40"><StackPanel Orientation="Horizontal" Margin="12,0"><md:PackIcon Kind="InformationOutline" Width="20" Height="20" VerticalAlignment="Center"/><TextBlock Text="About Orbit" Margin="12,0,0,0" VerticalAlignment="Center"/></StackPanel></ListBoxItem>
+                </ListBox>
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Column="1">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Focusable="False">
+                <Grid Margin="40,32,40,48" MaxWidth="680" HorizontalAlignment="Left">
+
+                    <!-- ================= General ================= -->
+                    <StackPanel x:Name="PageGeneral">
+                        <TextBlock Text="General" Style="{StaticResource TextTitle}"/>
+                        <TextBlock Text="Search engine" Style="{StaticResource TextStrong}" Margin="0,24,0,8"/>
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel Margin="16,12,16,12">
+                                <TextBlock Text="Used when you type words instead of a web address." Style="{StaticResource TextCaption}" Margin="0,0,0,8"/>
+                                <WrapPanel x:Name="Engines">
+                                    <RadioButton GroupName="engine" Style="{StaticResource Choice}" Width="200" Content="DuckDuckGo" Tag="https://duckduckgo.com/?q=%s" Checked="Engine_Checked"/>
+                                    <RadioButton GroupName="engine" Style="{StaticResource Choice}" Width="200" Content="Google" Tag="https://www.google.com/search?q=%s" Checked="Engine_Checked"/>
+                                    <RadioButton GroupName="engine" Style="{StaticResource Choice}" Width="200" Content="Bing" Tag="https://www.bing.com/search?q=%s" Checked="Engine_Checked"/>
+                                    <RadioButton GroupName="engine" Style="{StaticResource Choice}" Width="200" Content="Brave Search" Tag="https://search.brave.com/search?q=%s" Checked="Engine_Checked"/>
+                                    <RadioButton GroupName="engine" Style="{StaticResource Choice}" Width="200" Content="Startpage" Tag="https://www.startpage.com/do/search?q=%s" Checked="Engine_Checked"/>
+                                    <RadioButton GroupName="engine" Style="{StaticResource Choice}" Width="200" Content="Ecosia" Tag="https://www.ecosia.org/search?q=%s" Checked="Engine_Checked"/>
+                                    <RadioButton x:Name="EngineCustom" GroupName="engine" Style="{StaticResource Choice}" Width="200" Content="Custom address" Tag="custom" Checked="Engine_Checked"/>
+                                </WrapPanel>
+                                <StackPanel x:Name="CustomBox" Visibility="Collapsed" Margin="26,4,0,0">
+                                    <TextBox x:Name="CustomEngine" Style="{StaticResource TextField}" TextChanged="CustomEngine_Changed" AutomationProperties.Name="Custom search address"/>
+                                    <TextBlock x:Name="CustomHint" Text="Put %s where the search words should go, for example https://example.com/?q=%s" Style="{StaticResource TextCaption}" Margin="0,4,0,0"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Text="On start-up" Style="{StaticResource TextStrong}" Margin="0,24,0,8"/>
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <local:SettingRow Title="Home page" Description="Opens when you press Home or open a new window.">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Grid Width="240"><TextBox x:Name="HomeBox" Style="{StaticResource TextField}" LostFocus="Home_Commit" KeyDown="Home_Key" TextChanged="Home_Changed" AutomationProperties.Name="Home page address"/><TextBlock x:Name="HomeHint" Text="Orbit new tab page" Style="{StaticResource TextCaption}" FontSize="14" Margin="10,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False" TextWrapping="NoWrap"/></Grid>
+                                        <Button Content="Reset" Style="{StaticResource BtnGhost}" Margin="8,0,0,0" ToolTip="Use the Orbit new tab page" Click="HomeReset_Click"/>
+                                    </StackPanel>
+                                </local:SettingRow>
+                                <Border Style="{StaticResource Divider}"/>
+                                <local:SettingRow Title="Reopen the tabs from last time" Description="Restores your tabs when Orbit starts.">
+                                    <CheckBox x:Name="TglRestore" Style="{StaticResource Switch}" Click="Restore_Click" AutomationProperties.Name="Reopen the tabs from last time"/>
+                                </local:SettingRow>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- ================= Appearance ================= -->
+                    <StackPanel x:Name="PageAppearance" Visibility="Collapsed">
+                        <TextBlock Text="Appearance" Style="{StaticResource TextTitle}"/>
+                        <Border Style="{StaticResource Card}" Margin="0,24,0,0">
+                            <StackPanel>
+                                <local:SettingRow Title="Show the bookmarks bar" Description="A row of your bookmarks and folders under the address bar.">
+                                    <CheckBox x:Name="TglBar" Style="{StaticResource Switch}" Click="Bar_Click" AutomationProperties.Name="Show the bookmarks bar"/>
+                                </local:SettingRow>
+                                <Border Style="{StaticResource Divider}"/>
+                                <local:SettingRow Title="Dark mode for websites" Description="Asks Chromium to darken pages that don't have a dark theme. Takes effect after you restart Orbit.">
+                                    <CheckBox x:Name="TglDark" Style="{StaticResource Switch}" Click="Dark_Click" AutomationProperties.Name="Dark mode for websites"/>
+                                </local:SettingRow>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- ================= Privacy ================= -->
+                    <StackPanel x:Name="PagePrivacy" Visibility="Collapsed">
+                        <TextBlock Text="Privacy and security" Style="{StaticResource TextTitle}"/>
+                        <Border Style="{StaticResource Card}" Margin="0,24,0,0">
+                            <local:SettingRow Title="Block ads and trackers" Description="Blocks requests to a built-in list of common ad and analytics domains. Turn it off if a site doesn't work properly.">
+                                <CheckBox x:Name="TglAds" Style="{StaticResource Switch}" Click="Ads_Click" AutomationProperties.Name="Block ads and trackers"/>
+                            </local:SettingRow>
+                        </Border>
+                        <TextBlock Text="Browsing data" Style="{StaticResource TextStrong}" Margin="0,24,0,8"/>
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <local:SettingRow x:Name="RowHistory" Title="Browsing history" Description="The pages you've visited.">
+                                    <Button Content="Clear history…" Style="{StaticResource Btn}" Width="136" Click="ClearHistory_Click"/>
+                                </local:SettingRow>
+                                <Border Style="{StaticResource Divider}"/>
+                                <local:SettingRow Title="Cookies and site data" Description="You'll be signed out of most websites.">
+                                    <Button Content="Clear cookies…" Style="{StaticResource Btn}" Width="136" Click="ClearCookies_Click"/>
+                                </local:SettingRow>
+                                <Border Style="{StaticResource Divider}"/>
+                                <local:SettingRow Title="Cached files" Description="Frees disk space. Some pages may load more slowly once.">
+                                    <Button Content="Clear cache…" Style="{StaticResource Btn}" Width="136" Click="ClearCache_Click"/>
+                                </local:SettingRow>
+                            </StackPanel>
+                        </Border>
+                        <TextBlock Text="Private windows (Ctrl+Shift+N) never record history and forget cookies when closed." Style="{StaticResource TextCaption}" Margin="0,12,0,0"/>
+                    </StackPanel>
+
+                    <!-- ================= Downloads ================= -->
+                    <StackPanel x:Name="PageDownloads" Visibility="Collapsed">
+                        <TextBlock Text="Downloads" Style="{StaticResource TextTitle}"/>
+                        <Border Style="{StaticResource Card}" Margin="0,24,0,0">
+                            <StackPanel>
+                                <local:SettingRow Title="Save files to" Description="Where downloaded files are stored.">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBox x:Name="DlDir" Style="{StaticResource TextField}" Width="260" IsReadOnly="True" AutomationProperties.Name="Download folder"/>
+                                        <Button Content="Change…" Style="{StaticResource Btn}" Margin="8,0,0,0" Click="DlChange_Click"/>
+                                    </StackPanel>
+                                </local:SettingRow>
+                                <Border Style="{StaticResource Divider}"/>
+                                <local:SettingRow Title="Ask where to save each file" Description="Shows a Save As window for every download.">
+                                    <CheckBox x:Name="TglAsk" Style="{StaticResource Switch}" Click="Ask_Click" AutomationProperties.Name="Ask where to save each file"/>
+                                </local:SettingRow>
+                            </StackPanel>
+                        </Border>
+                        <Button Content="Open downloads folder" Style="{StaticResource BtnGhost}" HorizontalAlignment="Left" Margin="0,12,0,0" Click="DlOpen_Click"/>
+                    </StackPanel>
+
+                    <!-- ================= Updates ================= -->
+                    <StackPanel x:Name="PageUpdates" Visibility="Collapsed">
+                        <TextBlock Text="Updates" Style="{StaticResource TextTitle}"/>
+                        <Border Style="{StaticResource Card}" Margin="0,24,0,0">
+                            <StackPanel>
+                                <local:SettingRow Title="Keep Orbit up to date automatically" Description="Checks GitHub when Orbit starts, downloads and verifies new versions, and installs them the next time you open Orbit.">
+                                    <CheckBox x:Name="TglUpdate" Style="{StaticResource Switch}" Click="Update_Click" AutomationProperties.Name="Keep Orbit up to date automatically"/>
+                                </local:SettingRow>
+                                <Border Style="{StaticResource Divider}"/>
+                                <StackPanel Margin="16,12,16,16">
+                                    <TextBlock x:Name="UpdVersion" Style="{StaticResource TextBody}"/>
+                                    <TextBlock x:Name="UpdStatus" Style="{StaticResource TextCaption}" Margin="0,2,0,0"/>
+                                    <ProgressBar x:Name="UpdProg" Style="{StaticResource Thin}" Margin="0,12,0,0" Visibility="Collapsed"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                                        <Button x:Name="UpdCheck" Content="Check for updates" Style="{StaticResource Btn}" Click="UpdCheck_Click"/>
+                                        <Button x:Name="UpdRestart" Content="Restart to update" Style="{StaticResource BtnPrimary}" Margin="8,0,0,0" Visibility="Collapsed" Click="UpdRestart_Click"/>
+                                        <Button x:Name="UpdNotes" Content="What's new" Style="{StaticResource BtnGhost}" Margin="8,0,0,0" Visibility="Collapsed" Click="UpdNotes_Click"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- ================= About ================= -->
+                    <StackPanel x:Name="PageAbout" Visibility="Collapsed">
+                        <TextBlock Text="About Orbit" Style="{StaticResource TextTitle}"/>
+                        <Border Style="{StaticResource Card}" Margin="0,24,0,0">
+                            <StackPanel Orientation="Horizontal" Margin="24">
+                                <Image Source="Assets/orbit-256.png" Width="64" Height="64"/>
+                                <StackPanel Margin="20,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="Orbit" Style="{StaticResource TextSubtitle}"/>
+                                    <TextBlock x:Name="AboutVersion" Style="{StaticResource TextBody}" Margin="0,2,0,0"/>
+                                    <TextBlock x:Name="AboutEngine" Style="{StaticResource TextCaption}" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                            <Button Content="Source code" Style="{StaticResource Btn}" Tag="https://github.com/MykePalma/OrbitBrowser" Click="Link_Click"/>
+                            <Button Content="User guide" Style="{StaticResource Btn}" Margin="8,0,0,0" Tag="https://github.com/MykePalma/OrbitBrowser/wiki" Click="Link_Click"/>
+                            <Button Content="Report a problem" Style="{StaticResource Btn}" Margin="8,0,0,0" Tag="https://github.com/MykePalma/OrbitBrowser/issues/new" Click="Link_Click"/>
+                        </StackPanel>
+                        <TextBlock Text="Your data is stored on this computer in" Style="{StaticResource TextCaption}" Margin="0,24,0,0"/>
+                        <TextBlock x:Name="AboutData" Style="{StaticResource TextCaption}" Foreground="{StaticResource Fg}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Grid>
+            </ScrollViewer>
+
+            <!-- brief confirmation after a change (visibility of system status) -->
+            <Border x:Name="Toast" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,24" Background="{StaticResource Bar}" BorderBrush="{StaticResource Outline}" BorderThickness="1" CornerRadius="16" Padding="14,6">
+                <StackPanel Orientation="Horizontal">
+                    <md:PackIcon Kind="CheckCircleOutline" Width="18" Height="18" Foreground="{StaticResource Success}" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="ToastText" Margin="8,0,0,0" Style="{StaticResource TextBody}" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</local:ThemedWindow>

@@ -8,16 +8,16 @@
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="38" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False"/>
     </shell:WindowChrome.WindowChrome>
-    <Grid>
+    <Grid x:Name="Root">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="2"/>
-            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- tab strip -->
         <Grid x:Name="TabBar" Grid.Row="0" Background="{StaticResource Bg}" Height="38">
             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <ListBox x:Name="TabList" Grid.Column="0" shell:WindowChrome.IsHitTestVisibleInChrome="True" Background="Transparent" BorderThickness="0" AllowDrop="True"
+            <ListBox x:Name="TabList" Grid.Column="0" Margin="8,0,0,0" shell:WindowChrome.IsHitTestVisibleInChrome="True" Background="Transparent" BorderThickness="0" AllowDrop="True"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled"
                      SelectionChanged="TabList_SelectionChanged" Drop="TabList_Drop" PreviewMouseMove="TabList_MouseMove" PreviewMouseLeftButtonDown="TabList_Down">
                 <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ListBox.ItemsPanel>
@@ -34,18 +34,19 @@
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
+                                            <Border x:Name="tint" Panel.ZIndex="-1" IsHitTestVisible="False" Background="{Binding TintBrush}" Opacity="0.22" CornerRadius="8,8,0,0" Margin="-8,0,-4,0" Grid.ColumnSpan="4"/>
                                             <StackPanel Orientation="Horizontal">
                                                 <md:PackIcon Kind="ViewSplitVertical" Width="14" Height="14" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{StaticResource Acc}" Visibility="{Binding SplitVis}" ToolTip="In split view"/>
                                                 <Image Source="{Binding Favicon}" Width="16" Height="16" Margin="0,0,6,0" Visibility="{Binding FavVis}"/>
                                                 <TextBlock Text="{Binding Glyph}" Visibility="{Binding GlyphVis}" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="{StaticResource Mut}"/>
                                             </StackPanel>
                                             <TextBlock Grid.Column="1" Text="{Binding Title}" Visibility="{Binding TitleVis}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Foreground="{StaticResource Fg}"/>
-                                            <Button Grid.Column="2" Content="{Binding MuteGlyph}" Visibility="{Binding MuteVis}" Style="{StaticResource Flat}" Width="22" Height="22" FontSize="11" Click="TabMute_Click"/>
-                                            <Button Grid.Column="3" Content="✕" Visibility="{Binding CloseVis}" Style="{StaticResource Flat}" Width="22" Height="22" FontSize="11" Click="TabClose_Click"/>
+                                            <Button Grid.Column="2" Content="{Binding MuteGlyph}" Visibility="{Binding MuteVis}" Style="{StaticResource Flat}" Width="24" Height="24" FontSize="11" Click="TabMute_Click" ToolTip="Mute or unmute"/>
+                                            <Button Grid.Column="3" Content="✕" Visibility="{Binding CloseVis}" Style="{StaticResource Flat}" Width="24" Height="24" FontSize="11" Click="TabClose_Click" ToolTip="Close tab"/>
                                         </Grid>
                                     </Border>
                                     <ControlTemplate.Triggers>
-                                        <Trigger Property="IsSelected" Value="True"><Setter TargetName="bd" Property="Background" Value="{StaticResource Bar}"/></Trigger>
+                                        <Trigger Property="IsSelected" Value="True"><Setter TargetName="bd" Property="Background" Value="{StaticResource Bar}"/><Setter TargetName="tint" Property="Opacity" Value="0.5"/></Trigger>
                                     </ControlTemplate.Triggers>
                                 </ControlTemplate>
                             </Setter.Value>
@@ -54,11 +55,12 @@
                 </ListBox.ItemContainerStyle>
             </ListBox>
             <Button x:Name="NewTabBtn" Grid.Column="1" shell:WindowChrome.IsHitTestVisibleInChrome="True" Style="{StaticResource Flat}" Width="24" Height="24" Margin="4,7,8,0" ToolTip="New tab (Ctrl+T)" Click="NewTab_Click"><md:PackIcon Kind="Plus" Width="16" Height="16"/></Button>
-            <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Top" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+            <StackPanel x:Name="CaptionBtns" Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Top" shell:WindowChrome.IsHitTestVisibleInChrome="True">
                 <Button x:Name="MinBtn" Style="{StaticResource Caption}" ToolTip="Minimize" Click="Min_Click"><md:PackIcon Kind="WindowMinimize" Width="14" Height="14"/></Button>
                 <Button x:Name="MaxBtn" Style="{StaticResource Caption}" ToolTip="Maximize" Click="Max_Click"><md:PackIcon x:Name="MaxIcon" Kind="WindowMaximize" Width="14" Height="14"/></Button>
                 <Button x:Name="CloseBtn" Style="{StaticResource CaptionClose}" ToolTip="Close" Click="CloseWin_Click"><md:PackIcon Kind="Close" Width="16" Height="16"/></Button>
             </StackPanel>
+            <Border x:Name="DropLine" Grid.ColumnSpan="4" Width="3" Height="30" CornerRadius="1.5" Background="{StaticResource Acc}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,7,0,0" Visibility="Collapsed" IsHitTestVisible="False" Panel.ZIndex="50"/>
         </Grid>
 
         <!-- toolbar -->
@@ -96,13 +98,26 @@
 
         <ProgressBar x:Name="Prog" Grid.Row="2" Minimum="0" Maximum="1" Value="0" Height="2" Background="{StaticResource Bar}" Foreground="{StaticResource Acc}" BorderThickness="0" Visibility="Hidden"/>
 
+        <!-- update bar -->
+        <Border x:Name="UpdateBar" Grid.Row="3" Visibility="Collapsed" Background="#26FFFFFF" Padding="12,5">
+            <DockPanel>
+                <md:PackIcon Kind="ArrowUpBoldCircleOutline" Width="18" Height="18" Foreground="{StaticResource Acc}" VerticalAlignment="Center" DockPanel.Dock="Left" Margin="0,0,10,0"/>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                    <Button x:Name="UpdNow" Content="Restart to update" Style="{StaticResource Pill}" Click="UpdNow_Click"/>
+                    <Button x:Name="UpdNotes" Content="What's new" Style="{StaticResource PillGhost}" Click="UpdNotes_Click"/>
+                    <Button Content="Later" Style="{StaticResource PillGhost}" Click="UpdLater_Click"/>
+                </StackPanel>
+                <TextBlock x:Name="UpdText" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+            </DockPanel>
+        </Border>
+
         <!-- bookmarks bar -->
-        <ScrollViewer x:Name="BmBar" Grid.Row="3" Background="{StaticResource Bar}" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Hidden" Height="30">
+        <ScrollViewer x:Name="BmBar" Grid.Row="4" Background="{StaticResource Bar}" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Hidden" Height="30">
             <StackPanel x:Name="BmPanel" Orientation="Horizontal" Margin="8,0"/>
         </ScrollViewer>
 
         <!-- find bar -->
-        <Border x:Name="FindBar" Grid.Row="4" Background="{StaticResource Bar}" Visibility="Collapsed" BorderBrush="#33FFFFFF" BorderThickness="0,1,0,0">
+        <Border x:Name="FindBar" Grid.Row="5" Background="{StaticResource Bar}" Visibility="Collapsed" BorderBrush="#33FFFFFF" BorderThickness="0,1,0,0">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="6,4">
                 <TextBox x:Name="FindBox" Width="240" Background="{StaticResource Field}" Foreground="{StaticResource Fg}" CaretBrush="{StaticResource Fg}" BorderThickness="0" Padding="6,4" VerticalContentAlignment="Center"
                          TextChanged="Find_Changed" PreviewKeyDown="Find_Key"/>
@@ -115,11 +130,11 @@
         </Border>
 
         <!-- content -->
-        <Grid x:Name="Content_" Grid.Row="5" Background="{StaticResource Bg}">
+        <Grid x:Name="Content_" Grid.Row="6" Background="{StaticResource Bg}">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <GridSplitter x:Name="Splitter" Grid.Column="1" Width="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" ResizeBehavior="PreviousAndNext" Background="{StaticResource Bar}" Visibility="Collapsed" Panel.ZIndex="10"/>
             </Grid>
-        <Border x:Name="Status" Grid.Row="6" Background="{StaticResource Bar}" Padding="8,2" Visibility="Collapsed">
+        <Border x:Name="Status" Grid.Row="7" Background="{StaticResource Bar}" Padding="8,2" Visibility="Collapsed">
             <TextBlock x:Name="StatusText" TextTrimming="CharacterEllipsis" Foreground="{StaticResource Mut}"/>
         </Border>
     </Grid>

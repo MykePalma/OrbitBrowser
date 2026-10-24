@@ -7,13 +7,19 @@ namespace Lite;
 
 public partial class App : Application
 {
-    public static readonly List<MainWindow> Windows = new();
+    /// <summary>Open browser windows (named to avoid hiding Application.Windows).</summary>
+    public static readonly List<MainWindow> Browsers = new();
     public static string SelfTest;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
         Store.Load();
+        // a verified update downloaded earlier is installed now, before the browser engine starts
+        if (!Store.IsTestRun && Store.D.Settings.AutoUpdate && Updater.Staged() is StagedUpdate staged && Updater.CanWriteInstall())
+        {
+            Updater.LaunchInstaller(staged); Shutdown(); return;
+        }
         var s = new CefSettings
         {
             CachePath = Path.Combine(Store.Dir, "cache"),

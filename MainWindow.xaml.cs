@@ -28,12 +28,21 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         PrivateWin = priv;
-        App.Windows.Add(this);
+        App.Browsers.Add(this);
         if (priv) { Title = "Orbit (Private)"; TabBar.Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x1B, 0x3F)); }
         TabList.ItemsSource = Tabs;
         Tabs.CollectionChanged += (_, _) => RecalcTabs();
         TabBar.AllowDrop = true; TabBar.Drop += TabList_Drop;
+        TabBar.DragOver += TabDragOver; TabBar.DragLeave += (_, _) => DropLine.Visibility = Visibility.Collapsed;
+        TabList.GiveFeedback += (_, e) =>
+        {
+            e.UseDefaultCursors = false; Mouse.SetCursor(Cursors.Arrow);
+            ghost?.Follow(e.Effects != DragDropEffects.None);        // no valid target under the mouse -> dropping tears the tab off
+            e.Handled = true;
+        };
         StateChanged += (_, _) => UpdateWindowState();
+        Updater.Changed += OnUpdateChanged; Closed += (_, _) => Updater.Changed -= OnUpdateChanged;
+        OnUpdateChanged();
         TabBar.SizeChanged += (_, _) => RecalcTabs();
         RefreshBookmarks();
         PreviewKeyDown += Win_KeyDown;
@@ -46,7 +55,7 @@ public partial class MainWindow : Window
         PreviewMouseWheel += (_, e) => { if (Keyboard.Modifiers == ModifierKeys.Control) { Zoom(e.Delta > 0 ? 0.5 : -0.5); e.Handled = true; } };
         PreviewMouseDown += (_, e) => { if (e.ChangedButton == MouseButton.XButton1) { Back_Click(null, null); e.Handled = true; } else if (e.ChangedButton == MouseButton.XButton2) { Fwd_Click(null, null); e.Handled = true; } };
         Closing += (_, _) => SaveSession();
-        Closed += (_, _) => { App.Windows.Remove(this); foreach (var t in Tabs.ToList()) { try { t.Browser?.GetBrowserHost()?.CloseDevTools(); } catch { } t.Browser?.Dispose(); } };
+        Closed += (_, _) => { App.Browsers.Remove(this); foreach (var t in Tabs.ToList()) { try { t.Browser?.GetBrowserHost()?.CloseDevTools(); } catch { } t.Browser?.Dispose(); } };
         SourceInitialized += (_, _) => { try { var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle; int on = 1; DwmSetWindowAttribute(hwnd, 20, ref on, 4); } catch { } };
         Loaded += (_, _) =>
         {
@@ -55,6 +64,7 @@ public partial class MainWindow : Window
             if (restoring) { foreach (var u in Store.D.Session.ToList()) NewTab(u, false); TabList.SelectedIndex = Tabs.Count - 1; }
             if (startUrl != null || !restoring) NewTab(startUrl);   // a URL given on the command line opens in addition to the restored tabs
             if (App.SelfTest != null && !priv && first) _ = SelfTest.Run(this);
+            if (first && !priv && Updater.ShouldAutoCheck()) _ = Task.Delay(4000).ContinueWith(_ => Updater.CheckAsync(download: true));
         };
     }
 
@@ -97,7 +107,7 @@ public partial class MainWindow : Window
         if (!Tabs.Contains(t)) return;
         if (!t.Private && t.Url.StartsWith("http")) closed.Add(t.Url);
         int i = Tabs.IndexOf(t);
-        if (Tabs.Count == 1) { if (App.Windows.Count > 1 || true) { Close(); return; } }
+        if (Tabs.Count == 1) { if (App.Browsers.Count > 1 || true) { Close(); return; } }
         bool wasCur = t == Cur;
         EndSplitOf(t);
         Tabs.Remove(t); Content_.Children.Remove(t.Browser); t.Browser.Dispose();
@@ -108,7 +118,7 @@ public partial class MainWindow : Window
     void RecalcTabs()
     {
         if (Tabs.Count == 0) return;
-        double avail = TabBar.ActualWidth - NewTabBtn.ActualWidth - NewTabBtn.Margin.Left - NewTabBtn.Margin.Right - 12;
+        double avail = TabBar.ActualWidth - CaptionBtns.ActualWidth - TabList.Margin.Left - NewTabBtn.ActualWidth - NewTabBtn.Margin.Left - NewTabBtn.Margin.Right - 12;
         int pinned = Tabs.Count(t => t.Pinned), n = Tabs.Count - pinned;
         if (n == 0) return;
         double w = Math.Clamp((avail - pinned * 46) / n - 2, 44, 220);
@@ -166,10 +176,41 @@ public partial class MainWindow : Window
         if (Math.Abs(d.X) < 8 && Math.Abs(d.Y) < 8) return;
         if (e.OriginalSource is DependencyObject o && FindTab(o) is Tab t)
         {
-            var eff = DragDrop.DoDragDrop(TabList, new DataObject(typeof(Tab), t), DragDropEffects.Move);
+            var srcItem = TabList.ItemContainerGenerator.ContainerFromItem(t) as UIElement;
+            if (srcItem != null) srcItem.Opacity = 0.4;
+            ghost = new DragGhost(t); ghost.Follow(true); ghost.Show();
+            DragDropEffects eff;
+            try { eff = DragDrop.DoDragDrop(TabList, new DataObject(typeof(Tab), t), DragDropEffects.Move); }
+            finally { ghost.Close(); ghost = null; HideDropLines(); if (srcItem != null) srcItem.Opacity = 1; }
             if (t.MovedTo != null) { t.MovedTo = null; CloseTab(t); }                  // another window took the tab
             else if (eff == DragDropEffects.None && Tabs.Count > 1 && Tabs.Contains(t)) TearOff(t); // dropped outside any tab strip
         }
+    }
+
+    DragGhost ghost;
+
+    /// <summary>Slot (0..count) a tab dropped at this tab-bar position would take: before the first tab whose middle is to the right of the mouse.</summary>
+    public int InsertIndexAt(Point p)
+    {
+        for (int i = 0; i < Tabs.Count; i++)
+            if (TabList.ItemContainerGenerator.ContainerFromIndex(i) is FrameworkElement c && p.X < c.TranslatePoint(new Point(0, 0), TabBar).X + c.ActualWidth / 2) return i;
+        return Tabs.Count;
+    }
+    /// <summary>Shows the accent insertion marker at the edge of slot <paramref name="index"/>.</summary>
+    public void ShowDropLine(int index)
+    {
+        double x;
+        if (Tabs.Count == 0) x = TabList.Margin.Left;
+        else if (index < Tabs.Count && TabList.ItemContainerGenerator.ContainerFromIndex(index) is FrameworkElement c) x = c.TranslatePoint(new Point(0, 0), TabBar).X - 2;
+        else { var last = (FrameworkElement)TabList.ItemContainerGenerator.ContainerFromIndex(Tabs.Count - 1); x = last.TranslatePoint(new Point(last.ActualWidth, 0), TabBar).X; }
+        DropLine.Margin = new Thickness(Math.Max(0, x - 1), 7, 0, 0); DropLine.Visibility = Visibility.Visible;
+    }
+    void HideDropLines() { foreach (var w in App.Browsers) w.DropLine.Visibility = Visibility.Collapsed; }
+    void TabDragOver(object s, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(typeof(Tab))) return;
+        e.Effects = DragDropEffects.Move; e.Handled = true;
+        ShowDropLine(InsertIndexAt(e.GetPosition(TabBar)));
     }
 
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] struct POINT { public int X, Y; }
@@ -190,10 +231,10 @@ public partial class MainWindow : Window
     {
         if (e.Data.GetData(typeof(Tab)) is not Tab src) return;
         e.Handled = true;
-        var tgt = e.OriginalSource is DependencyObject o ? FindTab(o) : null;
-        if (!Tabs.Contains(src)) { AcceptTab(src, tgt != null ? Tabs.IndexOf(tgt) : Tabs.Count); e.Effects = DragDropEffects.Move; return; }
-        int to = tgt != null ? Tabs.IndexOf(tgt) : Tabs.Count - 1;
-        int from = Tabs.IndexOf(src);
+        DropLine.Visibility = Visibility.Collapsed;
+        int at = InsertIndexAt(e.GetPosition(TabBar));
+        if (!Tabs.Contains(src)) { AcceptTab(src, at); e.Effects = DragDropEffects.Move; return; }
+        int from = Tabs.IndexOf(src), to = at > from ? at - 1 : at;      // removing the tab first shifts later slots left by one
         if (from >= 0 && to >= 0 && from != to) { Tabs.Move(from, to); TabList.SelectedItem = src; }
     }
     static Tab FindTab(DependencyObject o) { while (o != null) { if (o is FrameworkElement f && f.DataContext is Tab t && f is ListBoxItem) return t; o = VisualTreeHelper.GetParent(o); } return null; }
@@ -229,17 +270,56 @@ public partial class MainWindow : Window
     public void ToggleSplit() { var c = Cur; if (c == null) return; if (c.Partner != null) EndSplit(c); else OpenSplitFor(c); }
     public void OnPaneFocus(Tab t) { if (Cur != null && Cur.Partner == t && Tabs.Contains(t)) TabList.SelectedItem = t; }
 
+    // ---------------------------------------------------------------- updates
+    bool updateDismissed;
+    void OnUpdateChanged()
+    {
+        var p = Updater.Phase; var v = Updater.Latest?.Version.ToString(3) ?? "";
+        bool show = !updateDismissed && !full && (p == UpdatePhase.Ready || p == UpdatePhase.Available || p == UpdatePhase.Downloading);
+        UpdateBar.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        UpdText.Text = p switch
+        {
+            UpdatePhase.Ready => $"Orbit {v} has been downloaded. Restart to finish updating.",
+            UpdatePhase.Downloading => Updater.Message,
+            UpdatePhase.Available => Updater.CanWriteInstall() ? $"Orbit {v} is available." : $"Orbit {v} is available. This copy can't update itself in its current folder.",
+            _ => ""
+        };
+        UpdNow.Visibility = p == UpdatePhase.Downloading ? Visibility.Collapsed : Visibility.Visible;
+        UpdNow.Content = p == UpdatePhase.Ready ? "Restart to update" : Updater.CanWriteInstall() ? "Update now" : "Download";
+        UpdNotes.Visibility = Updater.Latest?.PageUrl is { Length: > 0 } ? Visibility.Visible : Visibility.Collapsed;
+    }
+    async void UpdNow_Click(object s, RoutedEventArgs e)
+    {
+        if (Updater.Phase == UpdatePhase.Ready) { Updater.InstallAndRestart(); return; }
+        if (Updater.Phase == UpdatePhase.Available && Updater.Latest != null)
+        {
+            if (!Updater.CanWriteInstall()) { NewTab(Updater.Latest.PageUrl); return; }
+            await Updater.CheckAsync(download: true);                       // downloads and verifies it
+            if (Updater.Phase == UpdatePhase.Ready) Updater.InstallAndRestart();
+        }
+    }
+    void UpdNotes_Click(object s, RoutedEventArgs e) { if (Updater.Latest?.PageUrl is { Length: > 0 } u) NewTab(u); }
+    void UpdLater_Click(object s, RoutedEventArgs e) { updateDismissed = true; OnUpdateChanged(); }
+
     // ---------------------------------------------------------------- custom title bar
     void Min_Click(object s, RoutedEventArgs e) => WindowState = WindowState.Minimized;
     void Max_Click(object s, RoutedEventArgs e) => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
     void CloseWin_Click(object s, RoutedEventArgs e) => Close();
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+    /// <summary>How far a maximized window with a custom frame extends past the screen edge on each side (SM_CXSIZEFRAME + SM_CXPADDEDBORDER), in device-independent units.</summary>
+    Thickness MaximizedOverhang()
+    {
+        var dpi = VisualTreeHelper.GetDpi(this);
+        double x = (GetSystemMetrics(32) + GetSystemMetrics(92)) / dpi.DpiScaleX, y = (GetSystemMetrics(33) + GetSystemMetrics(92)) / dpi.DpiScaleY;
+        return new Thickness(x, y, x, y);
+    }
     void UpdateWindowState()
     {
         bool max = WindowState == WindowState.Maximized;
         MaxIcon.Kind = max ? MaterialDesignThemes.Wpf.PackIconKind.WindowRestore : MaterialDesignThemes.Wpf.PackIconKind.WindowMaximize;
         MaxBtn.ToolTip = max ? "Restore" : "Maximize";
         // a maximized chrome-less window overhangs the screen by the resize border
-        Padding = max && !full ? SystemParameters.WindowResizeBorderThickness : new Thickness(0);
+        Root.Margin = max && !full ? MaximizedOverhang() : new Thickness(0);   // (Window.Padding is not applied by the default template)
     }
 
     // ---------------------------------------------------------------- toolbar
@@ -281,9 +361,9 @@ public partial class MainWindow : Window
     void Zoom_Click(object s, MouseButtonEventArgs e) => Zoom(0, true);
 
     public void ShowDownloads() { dlWin ??= new DownloadsWindow(this); dlWin.Show(); dlWin.Activate(); }
-    public void ShowHistory() => new ListWindow(this, false).Show();
+    public void ShowHistory() { var w = Application.Current.Windows.OfType<HistoryWindow>().FirstOrDefault(); if (w != null) { w.Activate(); return; } new HistoryWindow(this).Show(); }
     public void ShowBookmarks() { var w = Application.Current.Windows.OfType<BookmarkManager>().FirstOrDefault(); if (w != null) { w.Activate(); return; } new BookmarkManager(this).Show(); }
-    public void ShowSettings() => new SettingsWindow(this).Show();
+    public void ShowSettings(string page = null) { var w = Application.Current.Windows.OfType<SettingsWindow>().FirstOrDefault() ?? new SettingsWindow(this); w.Show(); w.Activate(); if (page != null) w.ShowPage(page); }
 
     void Menu_Click(object s, RoutedEventArgs e)
     {
@@ -309,8 +389,8 @@ public partial class MainWindow : Window
         m.Items.Add(I("View page source", ViewSource, "Ctrl+U"));
         m.Items.Add(I("Developer tools", DevTools, "F12"));
         m.Items.Add(new Separator());
-        m.Items.Add(I("Settings", ShowSettings, "Ctrl+,"));
-        m.Items.Add(I("About Orbit", () => MessageBox.Show(this, "Orbit\nChromium " + Cef.ChromiumVersion + " · CefSharp " + Cef.CefSharpVersion, "About")));
+        m.Items.Add(I("Settings", () => ShowSettings(), "Ctrl+,"));
+        m.Items.Add(I("About Orbit", () => MessageBox.Show(this, "Orbit " + Updater.CurrentText + "\nChromium " + Cef.ChromiumVersion + " · CefSharp " + Cef.CefSharpVersion, "About")));
         m.Items.Add(I("Exit", () => Application.Current.Shutdown()));
         m.IsOpen = true;
     }
@@ -362,7 +442,7 @@ public partial class MainWindow : Window
     }
 
     // ---------------------------------------------------------------- bookmarks
-    public static void RefreshAll() { foreach (var w in App.Windows.ToList()) { w.RefreshBookmarks(); w.UpdateToolbar(); } }
+    public static void RefreshAll() { foreach (var w in App.Browsers.ToList()) { w.RefreshBookmarks(); w.UpdateToolbar(); } }
 
     public void ToggleBookmark()
     {
@@ -440,10 +520,10 @@ public partial class MainWindow : Window
 
         Button Mk(UIElement icon, string text, string tip)
         {
-            var sp = new StackPanel { Orientation = Orientation.Horizontal };
+            var sp = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(8, 0, 8, 0) };
             if (icon != null) { if (icon is FrameworkElement fe) fe.Margin = new Thickness(0, 0, 6, 0); sp.Children.Add(icon); }
             sp.Children.Add(new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center });
-            return new Button { Content = sp, ToolTip = tip, Style = (Style)FindResource("Flat"), Width = double.NaN, Height = 24, Padding = new Thickness(8, 0, 8, 0), FontSize = 12, Margin = new Thickness(0, 3, 2, 3) };
+            return new Button { Content = sp, ToolTip = tip, Style = (Style)FindResource("Flat"), Width = double.NaN, Height = 24, Padding = new Thickness(8, 0, 8, 0), FontSize = 12, Margin = new Thickness(0, 3, 4, 3) };
         }
 
         foreach (var f in Store.SubFolders("").ToList())
@@ -540,7 +620,7 @@ public partial class MainWindow : Window
         if (fs == full) return;
         full = fs;
         var v = fs ? Visibility.Collapsed : Visibility.Visible;
-        TabBar.Visibility = v; Toolbar.Visibility = v; Padding = new Thickness(0);
+        TabBar.Visibility = v; Toolbar.Visibility = v; Root.Margin = new Thickness(0);
         if (fs) { prevState = WindowState; prevStyle = WindowStyle; WindowStyle = WindowStyle.None; WindowState = WindowState.Normal; WindowState = WindowState.Maximized; BmBar.Visibility = Visibility.Collapsed; }
         else { WindowStyle = prevStyle; WindowState = prevState; RefreshBookmarks(); UpdateWindowState(); }
     }
@@ -548,7 +628,7 @@ public partial class MainWindow : Window
 
     void SaveSession()
     {
-        if (PrivateWin || App.Windows.Count > 1 && App.Windows.Last() != this && false) return;
+        if (PrivateWin || App.Browsers.Count > 1 && App.Browsers.Last() != this && false) return;
         Store.D.Session = Tabs.Where(t => !t.Private).Select(t => string.IsNullOrEmpty(Store.Display(t.Url)) ? Store.NewTab : t.Url).Where(u => u.StartsWith("http") || u == Store.NewTab).ToList();
         Store.SaveNow();
     }

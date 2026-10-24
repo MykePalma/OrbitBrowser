@@ -22,6 +22,7 @@ Unzip anywhere and run `Orbit.exe`. No installer, and no .NET install needed (th
 - **Private windows and tabs** that leave no history or cookies behind.
 - **Downloads manager** with progress, pause, cancel and open-folder.
 - **Ad and tracker blocking** (a built-in list of common ad and tracking domains; can be turned off).
+- **Automatic updates** (optional): Orbit checks GitHub for a newer release when it starts, downloads and verifies it in the background, and installs it the next time you open the browser.
 - **Settings**: search engine, home page, startup behaviour, download folder, forced dark mode for web pages.
 
 See the **[Wiki](https://github.com/MykePalma/OrbitBrowser/wiki)** for the full guide and keyboard shortcuts.
@@ -53,9 +54,13 @@ dotnet publish Lite.csproj -c Release -r win-x64 --self-contained true -o publis
 
 `Orbit.exe --selftest` runs a scripted end-to-end check of tabs, navigation, bookmarks, split view, downloads and more against a local test server. It uses a temporary profile, never your own, and writes `selftest.log` to `%TEMP%\Orbit-selftest`.
 
+## Updates
+
+Settings → **Keep Orbit up to date automatically** (on by default). At start-up Orbit asks the GitHub Releases API for the newest release. If it is newer, Orbit downloads `Orbit-win-x64.zip`, checks it against the SHA-256 checksum GitHub publishes for that file, and unpacks it into a staging folder. A banner offers **Restart to update**; if you ignore it, the update is installed automatically the next time you open Orbit. Nothing is installed unless the checksum matches, and Orbit only talks to `api.github.com` and the release download. Turn the setting off to disable the start-up check; **Check for updates** in Settings still works on demand.
+
 ## Your data
 
-Bookmarks, history, settings and the browser cache live in `%APPDATA%\Orbit`.
+Bookmarks, history, settings and the browser cache live in `%APPDATA%\Orbit` (set the `ORBIT_DATA_DIR` environment variable to keep them somewhere else).
 
 ## Status
 
