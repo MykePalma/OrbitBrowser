@@ -7,7 +7,7 @@ using Microsoft.Web.WebView2.Core;
 
 namespace Lite;
 
-/// <summary>Everything that connects a tab's WebView2 to the browser shell: navigation, downloads, dialogs, permissions, shortcuts, the ad blocker.</summary>
+/// <summary>Everything that connects a tab's WebView2 to the browser shell: navigation, downloads, dialogs, permissions and shortcuts.</summary>
 public partial class MainWindow
 {
     [DllImport("user32.dll")] static extern short GetKeyState(int vk);
@@ -23,7 +23,7 @@ public partial class MainWindow
             await wv.InitAsync(env);
             if (wv.Disposed || wv.Core == null) return;
             Wire(t, wv);
-            if (!wv.Private) await Extensions.StartAsync(wv.Core.Profile);   // extensions are in place before the first page loads
+            if (!wv.Private) await Extensions.StartAsync(wv.Core.Profile);   // (WebView2 keeps extensions out of private windows: they cannot see private tabs)   // extensions are in place before the first page loads
             if (wv.Disposed) return;
             if (wv.Pending != null) { var u = wv.Pending; wv.Pending = null; wv.Go(u); }
         }
@@ -43,9 +43,8 @@ public partial class MainWindow
         c.NavigationStarting += (_, e) =>
         {
             wv.NavUri = e.Uri;
-            if (e.Uri.StartsWith("http")) t.Url = e.Uri;      // the ad blocker needs the new page's host before its first request goes out
+            if (e.Uri.StartsWith("http")) t.Url = e.Uri;
             if (e.IsRedirected) return;
-            lock (t.BlockedUrls) t.BlockedUrls.Clear(); t.BlockedCount = 0; UpdateShieldFor(t);   // a new page: start counting again
             t.Loading = true; OnProgress(t, 0.3);
             if (t == Cur) UpdateToolbar();
         };
@@ -119,78 +118,11 @@ public partial class MainWindow
             ctl.ZoomFactorChanged += (_, _) => UpdateZoomLabel();
         }
 
-        // ad blocker: requests that match the filter lists are answered with an empty 403 instead of being sent
-        c.AddWebResourceRequestedFilter("http://*", CoreWebView2WebResourceContext.All);
-        c.AddWebResourceRequestedFilter("https://*", CoreWebView2WebResourceContext.All);
-        c.WebResourceRequested += (_, e) => FilterRequest(t, wv, e);
-        // element hiding: the page asks for the style sheet for its host, the shell answers (see CosmeticScript)
-        _ = c.AddScriptToExecuteOnDocumentCreatedAsync(CosmeticScript);
-        c.WebMessageReceived += (_, e) => OnCosmeticRequest(t, c, e);
-
         c.IsMuted = t.Muted;
     }
 
     static bool Down(int vk) => (GetKeyState(vk) & 0x8000) != 0;
     static string HostOf(string url) { try { return new Uri(url).Host; } catch { return ""; } }
-    void UpdateShieldFor(Tab t) { UI.Run(() => OnBlocked(t)); }
-
-    // ---------------------------------------------------------------- ad blocker
-    static ReqType Map(CoreWebView2WebResourceContext c) => c switch
-    {
-        CoreWebView2WebResourceContext.Document => ReqType.SubDocument,
-        CoreWebView2WebResourceContext.Stylesheet => ReqType.Stylesheet,
-        CoreWebView2WebResourceContext.Script => ReqType.Script,
-        CoreWebView2WebResourceContext.Image => ReqType.Image,
-        CoreWebView2WebResourceContext.Font => ReqType.Font,
-        CoreWebView2WebResourceContext.Media => ReqType.Media,
-        CoreWebView2WebResourceContext.XmlHttpRequest or CoreWebView2WebResourceContext.Fetch => ReqType.Xhr,
-        CoreWebView2WebResourceContext.Ping => ReqType.Ping,
-        CoreWebView2WebResourceContext.Websocket => ReqType.WebSocket,
-        _ => ReqType.Other
-    };
-
-    void FilterRequest(Tab t, Wv wv, CoreWebView2WebResourceRequestedEventArgs e)
-    {
-        try
-        {
-            if (!Store.D.Settings.AdBlock) return;
-            var url = e.Request.Uri;
-            if (e.ResourceContext == CoreWebView2WebResourceContext.Document && (url == wv.NavUri || url == t.Url)) return;   // never block the page being opened
-            var top = t.Host; if (AdBlocker.IsPaused(top)) return;
-            var type = Map(e.ResourceContext);
-            bool hit = AdBlocker.Engine.ShouldBlock(url, top, type);
-            AdBlocker.Trace?.Enqueue((hit ? "BLOCK " : "allow ") + e.ResourceContext + " " + top + " <- " + url);
-            if (!hit) return;
-            e.Response = wv.Core.Environment.CreateWebResourceResponse(null, 403, "Blocked", "Content-Type: text/plain");
-            bool added; lock (t.BlockedUrls) { added = t.BlockedUrls.Add(url); t.BlockedCount = t.BlockedUrls.Count; }
-            if (added && Interlocked.Exchange(ref t.BlockedDirty, 1) == 0) UI.Run(() => { t.BlockedDirty = 0; OnBlocked(t); });   // at most one UI update in flight
-        }
-        catch { }
-    }
-
-    /// <summary>Runs at the start of every page: asks the shell for the element-hiding CSS of this host and adds it as soon as the document exists.</summary>
-    const string CosmeticScript = @"(function(){
-if(window.top!==window||!/^https?:$/.test(location.protocol)||!window.chrome||!window.chrome.webview)return;
-var host=location.hostname,done=false;
-function add(css){var r=document.documentElement;if(!r)return false;var s=document.createElement('style');s.setAttribute('data-orbit-adblock','1');s.textContent=css;r.appendChild(s);return true}
-function put(css){if(done||!css)return;done=true;if(!add(css)){var o=new MutationObserver(function(){if(add(css))o.disconnect()});o.observe(document,{childList:true})}}
-window.chrome.webview.addEventListener('message',function(e){var d=e.data;if(d&&d.o==='orbit-css'&&d.h===host)put(d.css)});
-window.chrome.webview.postMessage('orbit-css:'+host);
-})();";
-
-    void OnCosmeticRequest(Tab t, CoreWebView2 c, CoreWebView2WebMessageReceivedEventArgs e)
-    {
-        try
-        {
-            var m = e.TryGetWebMessageAsString(); if (m == null || !m.StartsWith("orbit-css:")) return;
-            if (!Store.D.Settings.AdBlock) return;
-            var host = m[10..]; if (host != HostOf(e.Source)) return;
-            if (AdBlocker.IsPaused(t.Host) || AdBlocker.IsPaused(host)) return;
-            var css = AdBlocker.Engine.CosmeticCss(host); if (css.Length == 0) return;
-            c.PostWebMessageAsJson(JsonSerializer.Serialize(new { o = "orbit-css", h = host, css }));
-        }
-        catch { }
-    }
 
     // ---------------------------------------------------------------- downloads
     void OnDownload(CoreWebView2DownloadStartingEventArgs e)
@@ -205,14 +137,20 @@ window.chrome.webview.postMessage('orbit-css:'+host);
         e.Handled = !Store.D.Settings.AskDownload;
         int id = ++dlCounter;
         DownloadsWindow.Add(id, op.Uri, path, () => op.Pause(), () => op.Resume(), () => op.Cancel());
+        int full = 0;   // polls in a row that showed every byte received
         void Push()
         {
             long rec = op.BytesReceived, tot = (long)(op.TotalBytesToReceive ?? 0);
-            bool done = op.State == CoreWebView2DownloadState.Completed, cancel = op.State == CoreWebView2DownloadState.Interrupted;
+            // the engine now and then never reports "completed" for a download that has all its bytes: trust the bytes after a second
+            bool done = op.State == CoreWebView2DownloadState.Completed || (op.State == CoreWebView2DownloadState.InProgress && full >= 3 && File.Exists(op.ResultFilePath)), cancel = op.State == CoreWebView2DownloadState.Interrupted;
             DownloadsWindow.Update(id, rec, tot, tot > 0 ? (int)(rec * 100 / tot) : 0, done, cancel, op.ResultFilePath);
         }
         op.BytesReceivedChanged += (_, _) => Push();
         op.StateChanged += (_, _) => Push();
+        // belt and braces: a download that finishes very quickly can slip past the events, so also look at it while it runs
+        var poll = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        poll.Tick += (_, _) => { full = op.State == CoreWebView2DownloadState.InProgress && (long)(op.TotalBytesToReceive ?? 0) > 0 && op.BytesReceived >= (long)(op.TotalBytesToReceive ?? 0) ? full + 1 : 0; Push(); if (op.State != CoreWebView2DownloadState.InProgress || full >= 3) poll.Stop(); };
+        poll.Start();
         ShowDownloads();
     }
 

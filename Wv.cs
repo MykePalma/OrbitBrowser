@@ -16,7 +16,7 @@ public class Wv : WebView2
     public readonly bool Private;
     /// <summary>Address to open as soon as the engine for this view is up.</summary>
     public string Pending;
-    /// <summary>The address of the navigation in progress (the main document is never filtered by the ad blocker).</summary>
+    /// <summary>The address of the navigation in progress.</summary>
     public volatile string NavUri = "";
     public bool Disposed;
 

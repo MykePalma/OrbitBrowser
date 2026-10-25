@@ -38,12 +38,6 @@ public class Settings
 {
     public string Home { get; set; } = "lite://newtab";
     public string Engine { get; set; } = "https://duckduckgo.com/?q=%s";
-    public bool AdBlock { get; set; } = true;
-    public bool BlockAds { get; set; } = true;          // EasyList
-    public bool BlockTrackers { get; set; } = true;     // EasyPrivacy
-    /// <summary>Sites (and their sub-domains) where blocking is paused.</summary>
-    public List<string> AdAllow { get; set; } = new();
-    public DateTime LastFilterUpdateUtc { get; set; }
     public bool Restore { get; set; } = true;
     public bool DarkPages { get; set; }
     public bool AskDownload { get; set; }
@@ -51,6 +45,8 @@ public class Settings
     /// <summary>Look for a newer Orbit on GitHub at start-up, download it in the background and install it on the next restart.</summary>
     public bool AutoUpdate { get; set; } = true;
     public DateTime LastUpdateCheckUtc { get; set; }
+    /// <summary>When the installed extensions were last checked for newer versions.</summary>
+    public DateTime LastExtUpdateUtc { get; set; }
     public string DownloadDir { get; set; } = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + "\\Downloads";
 }
 
@@ -81,7 +77,7 @@ public static class Store
     public static void Load()
     {
         // the app used to be called LiteBrowser: carry its bookmarks, history and settings over once
-        if (TestRun) { try { Directory.Delete(Dir, true); } catch { } }
+        if (TestRun && Environment.GetEnvironmentVariable("ORBIT_KEEP_TEST") != "1") { try { Directory.Delete(Dir, true); } catch { } }
         else try { if (!Directory.Exists(Dir) && Directory.Exists(LegacyDir)) Directory.Move(LegacyDir, Dir); } catch { }
         Directory.CreateDirectory(Dir);
         try { D = JsonSerializer.Deserialize<Data>(File.ReadAllText(File_)) ?? new Data(); } catch { D = new Data(); }
@@ -209,12 +205,7 @@ public class Tab : INotifyPropertyChanged
 
     string title = "New Tab"; public string Title { get => title; set { title = string.IsNullOrWhiteSpace(value) ? "New Tab" : value; P(); } }
     string url = ""; public string Url { get => url; set { url = value ?? ""; try { Host = url.StartsWith("http") ? new Uri(url).Host.ToLowerInvariant() : ""; } catch { Host = ""; } P(); } }
-    /// <summary>Host of the page in this tab (lower-case), or empty for non-web pages; read by the ad blocker on other threads.</summary>
     public volatile string Host = "";
-    /// <summary>Requests the ad blocker has stopped for the current page.</summary>
-    public int BlockedCount; public int BlockedDirty;
-    /// <summary>Distinct URLs blocked on the current page (guarded by its own lock).</summary>
-    public readonly HashSet<string> BlockedUrls = new();
     bool loading; public bool Loading { get => loading; set { loading = value; Pn(nameof(Loading), nameof(Glyph), nameof(FavVis), nameof(GlyphVis)); } }
     ImageSource fav; public ImageSource Favicon { get => fav; set { fav = value; if (value == null) Tint = null; Pn(nameof(Favicon), nameof(FavVis), nameof(GlyphVis)); } }
     /// <summary>Dominant colour of the site icon, used to tint the tab; null when there is no icon or it has no clear colour.</summary>
