@@ -15,6 +15,7 @@
                     <ListBoxItem Tag="General" Height="40"><StackPanel Orientation="Horizontal" Margin="12,0"><md:PackIcon Kind="CogOutline" Width="20" Height="20" VerticalAlignment="Center"/><TextBlock Text="General" Margin="12,0,0,0" VerticalAlignment="Center"/></StackPanel></ListBoxItem>
                     <ListBoxItem Tag="Appearance" Height="40"><StackPanel Orientation="Horizontal" Margin="12,0"><md:PackIcon Kind="PaletteOutline" Width="20" Height="20" VerticalAlignment="Center"/><TextBlock Text="Appearance" Margin="12,0,0,0" VerticalAlignment="Center"/></StackPanel></ListBoxItem>
                     <ListBoxItem Tag="Privacy" Height="40"><StackPanel Orientation="Horizontal" Margin="12,0"><md:PackIcon Kind="ShieldLockOutline" Width="20" Height="20" VerticalAlignment="Center"/><TextBlock Text="Privacy and security" Margin="12,0,0,0" VerticalAlignment="Center"/></StackPanel></ListBoxItem>
+                    <ListBoxItem Tag="Extensions" Height="40"><StackPanel Orientation="Horizontal" Margin="12,0"><md:PackIcon Kind="PuzzleOutline" Width="20" Height="20" VerticalAlignment="Center"/><TextBlock Text="Extensions" Margin="12,0,0,0" VerticalAlignment="Center"/></StackPanel></ListBoxItem>
                     <ListBoxItem Tag="Downloads" Height="40"><StackPanel Orientation="Horizontal" Margin="12,0"><md:PackIcon Kind="TrayArrowDown" Width="20" Height="20" VerticalAlignment="Center"/><TextBlock Text="Downloads" Margin="12,0,0,0" VerticalAlignment="Center"/></StackPanel></ListBoxItem>
                     <ListBoxItem Tag="Updates" Height="40"><StackPanel Orientation="Horizontal" Margin="12,0"><md:PackIcon Kind="Update" Width="20" Height="20" VerticalAlignment="Center"/><TextBlock Text="Updates" Margin="12,0,0,0" VerticalAlignment="Center"/></StackPanel></ListBoxItem>
                     <ListBoxItem Tag="About" Height="40"><StackPanel Orientation="Horizontal" Margin="12,0"><md:PackIcon Kind="InformationOutline" Width="20" Height="20" VerticalAlignment="Center"/><TextBlock Text="About Orbit" Margin="12,0,0,0" VerticalAlignment="Center"/></StackPanel></ListBoxItem>
@@ -145,6 +146,50 @@
                             </StackPanel>
                         </Border>
                         <TextBlock Text="Private windows (Ctrl+Shift+N) never record history and forget cookies when closed." Style="{StaticResource TextCaption}" Margin="0,12,0,0"/>
+                    </StackPanel>
+
+                    <!-- ================= Extensions ================= -->
+                    <StackPanel x:Name="PageExtensions" Visibility="Collapsed">
+                        <TextBlock Text="Extensions" Style="{StaticResource TextTitle}"/>
+                        <TextBlock Text="Orbit runs Chrome extensions. It has no toolbar buttons for them yet, so manage them here and open an extension's own settings from its row." Style="{StaticResource TextCaption}" TextWrapping="Wrap" Margin="0,8,0,0"/>
+
+                        <TextBlock Text="Recommended" Style="{StaticResource TextStrong}" Margin="0,24,0,8"/>
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <local:SettingRow Title="uBlock Origin" Description="A free, open-source content blocker that also removes ads inside pages. Orbit downloads the latest release from its GitHub page. When it is installed, Orbit's built-in blocker turns itself off so the two don't both run.">
+                                    <Button x:Name="UboInstall" Content="Install" Style="{StaticResource BtnPrimary}" Width="120" Click="UboInstall_Click"/>
+                                </local:SettingRow>
+                                <ProgressBar x:Name="ExtProg" Style="{StaticResource Thin}" IsIndeterminate="True" Margin="16,0,16,12" Visibility="Collapsed"/>
+                            </StackPanel>
+                        </Border>
+                        <TextBlock x:Name="ExtStatus" Style="{StaticResource TextCaption}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+
+                        <TextBlock Text="Installed" Style="{StaticResource TextStrong}" Margin="0,24,0,8"/>
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel Margin="0,4">
+                                <TextBlock x:Name="ExtEmpty" Text="No extensions installed." Style="{StaticResource TextCaption}" Margin="16,12"/>
+                                <ItemsControl x:Name="ExtList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid MinHeight="48" Margin="16,0,8,0">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                <StackPanel VerticalAlignment="Center" Margin="0,6">
+                                                    <TextBlock Text="{Binding Name}" Style="{StaticResource TextBody}"/>
+                                                    <TextBlock Text="{Binding Version, StringFormat='Version {0}'}" Style="{StaticResource TextCaption}"/>
+                                                </StackPanel>
+                                                <Button Grid.Column="1" Style="{StaticResource BtnGhost}" Content="Options" Tag="{Binding}" Click="ExtOptions_Click" Visibility="{Binding OptionsVis}"/>
+                                                <Button Grid.Column="2" Style="{StaticResource BtnGhost}" Content="Remove" Tag="{Binding}" Click="ExtRemove_Click"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                            <Button Content="Add from folder…" Style="{StaticResource Btn}" Click="ExtFolder_Click"/>
+                            <Button Content="Add from .zip…" Style="{StaticResource Btn}" Margin="8,0,0,0" Click="ExtZip_Click"/>
+                        </StackPanel>
+                        <TextBlock Text="Extensions can read and change the pages you visit, so only add ones you trust. Chrome Web Store installs aren't supported by this engine; use an extension's unpacked folder or zip." Style="{StaticResource TextCaption}" TextWrapping="Wrap" Margin="0,12,0,0"/>
                     </StackPanel>
 
                     <!-- ================= Downloads ================= -->

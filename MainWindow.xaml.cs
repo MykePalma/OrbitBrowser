@@ -5,20 +5,17 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
-using CefSharp;
-using CefSharp.Wpf.HwndHost;
-
 namespace Lite;
 
 public class Sugg { public string Display { get; set; } public string Url { get; set; } public override string ToString() => Display; }
 
 public partial class MainWindow : Window
 {
+    // (browser-engine wiring lives in MainWindow.Web.cs)
     [System.Runtime.InteropServices.DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int a, ref int v, int s);
     public readonly bool PrivateWin;
     public readonly ObservableCollection<Tab> Tabs = new();
     public Tab Cur => TabList.SelectedItem as Tab;
-    RequestContext privCtx;
     readonly List<string> closed = new();
     DownloadsWindow dlWin;
     static bool restored;
@@ -55,7 +52,7 @@ public partial class MainWindow : Window
         PreviewMouseWheel += (_, e) => { if (Keyboard.Modifiers == ModifierKeys.Control) { Zoom(e.Delta > 0 ? 0.5 : -0.5); e.Handled = true; } };
         PreviewMouseDown += (_, e) => { if (e.ChangedButton == MouseButton.XButton1) { Back_Click(null, null); e.Handled = true; } else if (e.ChangedButton == MouseButton.XButton2) { Fwd_Click(null, null); e.Handled = true; } };
         Closing += (_, _) => SaveSession();
-        Closed += (_, _) => { App.Browsers.Remove(this); foreach (var t in Tabs.ToList()) { try { t.Browser?.GetBrowserHost()?.CloseDevTools(); } catch { } t.Browser?.Dispose(); } };
+        Closed += (_, _) => { App.Browsers.Remove(this); foreach (var t in Tabs.ToList()) t.Wv?.Dispose(); };
         SourceInitialized += (_, _) => { try { var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle; int on = 1; DwmSetWindowAttribute(hwnd, 20, ref on, 4); } catch { } };
         Loaded += (_, _) =>
         {
@@ -73,20 +70,11 @@ public partial class MainWindow : Window
     public Tab NewTab(string url, bool select = true, bool? priv = null, Tab afterTab = null, int index = -1)
     {
         var t = new Tab { Private = priv ?? PrivateWin };
-        var b = new ChromiumWebBrowser { Visibility = Visibility.Hidden };
-        if (t.Private) { privCtx ??= new RequestContext(new RequestContextSettings { CachePath = "", PersistSessionCookies = false }); b.RequestContext = privCtx; }
-        t.Browser = b;
-        b.DisplayHandler = new TabDisplay(t, this); b.LifeSpanHandler = new TabLifeSpan(t, this); b.DownloadHandler = new TabDownload(this);
-        b.KeyboardHandler = new TabKeyboard(this); b.MenuHandler = new TabContextMenu(t, this); b.PermissionHandler = new TabPermissions(t);
-        b.FindHandler = new TabFind(this); b.FocusHandler = new TabFocus(t, this); b.JsDialogHandler = new TabJsDialog(this); b.RequestHandler = new TabRequest(t, this); b.RenderProcessMessageHandler = new CosmeticInjector(t);
-        b.LoadingStateChanged += (_, e) => Dispatcher.BeginInvoke(() =>
-        {
-            t.Loading = e.IsLoading; t.CanBack = e.CanGoBack; t.CanFwd = e.CanGoForward;
-            if (!e.IsLoading) { AddHistory(t); if (t == Cur) Prog.Visibility = Visibility.Hidden; }
-            if (t == Cur) UpdateToolbar();
-        });
-        b.Address = Store.Resolve(url ?? Store.D.Settings.Home); t.Url = b.Address;
+        var b = new Wv(t.Private) { Visibility = Visibility.Hidden };
+        t.Wv = b;
+        b.Pending = Store.Resolve(url ?? Store.D.Settings.Home); t.Url = b.Pending; b.NavUri = b.Pending;
         Content_.Children.Add(b);
+        _ = InitTab(t, b);
         int i = index >= 0 ? index : afterTab != null && Tabs.Contains(afterTab) ? Tabs.IndexOf(afterTab) + 1 : Tabs.Count;
         Tabs.Insert(i, t);
         if (select) { TabList.SelectedItem = t; if (string.IsNullOrEmpty(url) || url == Store.NewTab) { } }
@@ -100,7 +88,7 @@ public partial class MainWindow : Window
         Prog.Visibility = Visibility.Hidden; Status.Visibility = Visibility.Collapsed;
         UpdateToolbar();
         Title = t.Title + " - Orbit" + (PrivateWin ? " (Private)" : "");
-        if (string.IsNullOrEmpty(Store.Display(t.Url))) { UrlBox.Focus(); } else t.Browser.Focus();
+        if (string.IsNullOrEmpty(Store.Display(t.Url))) { UrlBox.Focus(); } else t.Wv.Focus();
     }
 
     public void CloseTab(Tab t)
@@ -111,7 +99,7 @@ public partial class MainWindow : Window
         if (Tabs.Count == 1) { if (App.Browsers.Count > 1 || true) { Close(); return; } }
         bool wasCur = t == Cur;
         EndSplitOf(t);
-        Tabs.Remove(t); Content_.Children.Remove(t.Browser); t.Browser.Dispose();
+        Tabs.Remove(t); Content_.Children.Remove(t.Wv); t.Wv.Dispose();
         if (wasCur) TabList.SelectedIndex = Math.Min(i, Tabs.Count - 1);
         LayoutPanes();
     }
@@ -132,7 +120,7 @@ public partial class MainWindow : Window
     void TabMute_Click(object s, RoutedEventArgs e) { if ((s as FrameworkElement)?.DataContext is Tab t) ToggleMute(t); e.Handled = true; }
     void NewTab_Click(object s, RoutedEventArgs e) => NewTab(null);
 
-    public void ToggleMute(Tab t) { t.Muted = !t.Muted; try { t.Browser.GetBrowserHost()?.SetAudioMuted(t.Muted); } catch { } }
+    public void ToggleMute(Tab t) { t.Muted = !t.Muted; try { if (t.Wv.Core != null) t.Wv.Core.IsMuted = t.Muted; } catch { } }
     public void TogglePin(Tab t)
     {
         t.Pinned = !t.Pinned;
@@ -150,7 +138,7 @@ public partial class MainWindow : Window
         var m = new ContextMenu();
         MenuItem I(string h, Action a) => Ic.Item(h, a);
         m.Items.Add(I("New tab", () => NewTab(null, true, null, t)));
-        m.Items.Add(I("Reload", () => t.Browser.Reload()));
+        m.Items.Add(I("Reload", () => t.Wv.Reload()));
         m.Items.Add(I("Duplicate", () => Duplicate(t)));
         if (t.Partner != null) m.Items.Add(I("Close split view", () => EndSplit(t)));
         else
@@ -250,9 +238,9 @@ public partial class MainWindow : Window
         foreach (var x in Tabs)
         {
             bool show = x == cur || (split && x == p);
-            x.Browser.Visibility = show ? Visibility.Visible : Visibility.Hidden;
-            if (split && show) { Grid.SetColumn(x.Browser, x.SplitLeft ? 0 : 2); Grid.SetColumnSpan(x.Browser, 1); }
-            else { Grid.SetColumn(x.Browser, 0); Grid.SetColumnSpan(x.Browser, 3); }
+            x.Wv.Visibility = show ? Visibility.Visible : Visibility.Hidden;
+            if (split && show) { Grid.SetColumn(x.Wv, x.SplitLeft ? 0 : 2); Grid.SetColumnSpan(x.Wv, 1); }
+            else { Grid.SetColumn(x.Wv, 0); Grid.SetColumnSpan(x.Wv, 3); }
         }
     }
     public void StartSplit(Tab a, Tab b)
@@ -338,7 +326,7 @@ public partial class MainWindow : Window
     }
     void UpdateZoomLabel()
     {
-        double z = 0; try { if (Cur?.Browser.IsBrowserInitialized == true) z = Cur.Browser.ZoomLevel; } catch { }
+        double z = 0; try { if (Cur?.Wv.Ready == true) z = Cur.Wv.ZoomLevel; } catch { }
         int pct = (int)Math.Round(Math.Pow(1.2, z) * 100);
         ZoomLbl.Text = pct != 100 ? pct + "%" : "";
     }
@@ -350,12 +338,12 @@ public partial class MainWindow : Window
     {
         if (Cur == null) { NewTab(input); return; }
         var u = Store.Resolve(input);
-        if (Cur.Browser.IsBrowserInitialized) Cur.Browser.Load(u); else Cur.Browser.Address = u;
-        Cur.Browser.Focus();
+        Cur.Wv.Go(u);
+        Cur.Wv.Focus();
     }
-    void Back_Click(object s, RoutedEventArgs e) { if (Cur?.CanBack == true) Cur.Browser.Back(); }
-    void Fwd_Click(object s, RoutedEventArgs e) { if (Cur?.CanFwd == true) Cur.Browser.Forward(); }
-    void Reload_Click(object s, RoutedEventArgs e) { if (Cur == null) return; if (Cur.Loading) Cur.Browser.Stop(); else Cur.Browser.Reload(); }
+    void Back_Click(object s, RoutedEventArgs e) { if (Cur?.CanBack == true) Cur.Wv.Core?.GoBack(); }
+    void Fwd_Click(object s, RoutedEventArgs e) { if (Cur?.CanFwd == true) Cur.Wv.Core?.GoForward(); }
+    void Reload_Click(object s, RoutedEventArgs e) { if (Cur == null) return; if (Cur.Loading) Cur.Wv.Core?.Stop(); else Cur.Wv.Reload(); }
     void Home_Click(object s, RoutedEventArgs e) => Navigate(Store.D.Settings.Home);
     void Star_Click(object s, RoutedEventArgs e) => ToggleBookmark();
     void Downloads_Click(object s, RoutedEventArgs e) => ShowDownloads();
@@ -391,7 +379,7 @@ public partial class MainWindow : Window
         m.Items.Add(I("Developer tools", DevTools, "F12"));
         m.Items.Add(new Separator());
         m.Items.Add(I("Settings", () => ShowSettings(), "Ctrl+,"));
-        m.Items.Add(I("About Orbit", () => MessageBox.Show(this, "Orbit " + Updater.CurrentText + "\nChromium " + Cef.ChromiumVersion + " · CefSharp " + Cef.CefSharpVersion, "About")));
+        m.Items.Add(I("About Orbit", () => MessageBox.Show(this, "Orbit " + Updater.CurrentText + "\nChromium " + App.EngineVersion + " · Microsoft WebView2", "About")));
         m.Items.Add(I("Exit", () => Application.Current.Shutdown()));
         m.IsOpen = true;
     }
@@ -438,7 +426,7 @@ public partial class MainWindow : Window
         }
         else if (e.Key == Key.Escape)
         {
-            SuggPopup.IsOpen = false; suppressUrl = true; UrlBox.Text = Store.Display(Cur?.Url); suppressUrl = false; Cur?.Browser.Focus(); e.Handled = true;
+            SuggPopup.IsOpen = false; suppressUrl = true; UrlBox.Text = Store.Display(Cur?.Url); suppressUrl = false; Cur?.Wv.Focus(); e.Handled = true;
         }
     }
 
@@ -467,7 +455,7 @@ public partial class MainWindow : Window
         var m = new ContextMenu { PlacementTarget = ShieldBtn, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
         var head = Ic.Item(paused ? $"Blocking is paused on {t.Host}" : t.BlockedCount == 0 ? "Nothing blocked on this page" : $"{t.BlockedCount:N0} blocked on this page", null, null, paused ? MaterialDesignThemes.Wpf.PackIconKind.ShieldOffOutline : MaterialDesignThemes.Wpf.PackIconKind.ShieldCheckOutline);
         head.IsEnabled = false; m.Items.Add(head); m.Items.Add(new Separator());
-        m.Items.Add(Ic.Item(paused ? $"Resume blocking on {t.Host}" : $"Pause blocking on {t.Host}", () => { AdBlocker.SetPaused(t.Host, !paused); lock (t.BlockedUrls) t.BlockedUrls.Clear(); t.BlockedCount = 0; t.Browser.Reload(); foreach (var w in App.Browsers.ToList()) w.UpdateShield(); }, null, paused ? MaterialDesignThemes.Wpf.PackIconKind.ShieldCheckOutline : MaterialDesignThemes.Wpf.PackIconKind.ShieldOffOutline));
+        m.Items.Add(Ic.Item(paused ? $"Resume blocking on {t.Host}" : $"Pause blocking on {t.Host}", () => { AdBlocker.SetPaused(t.Host, !paused); lock (t.BlockedUrls) t.BlockedUrls.Clear(); t.BlockedCount = 0; t.Wv.Reload(); foreach (var w in App.Browsers.ToList()) w.UpdateShield(); }, null, paused ? MaterialDesignThemes.Wpf.PackIconKind.ShieldCheckOutline : MaterialDesignThemes.Wpf.PackIconKind.ShieldOffOutline));
         m.Items.Add(Ic.Item("Ad blocker settings…", () => ShowSettings("Privacy"), null, MaterialDesignThemes.Wpf.PackIconKind.CogOutline));
         m.IsOpen = true;
     }
@@ -596,14 +584,23 @@ public partial class MainWindow : Window
 
     // ---------------------------------------------------------------- find
     public void ShowFind() { FindBar.Visibility = Visibility.Visible; FindBox.Focus(); FindBox.SelectAll(); if (FindBox.Text != "") Find_Changed(null, null); }
-    void HideFind() { FindBar.Visibility = Visibility.Collapsed; FindCount.Text = ""; Cur?.Browser.GetBrowserHost()?.StopFinding(true); Cur?.Browser.Focus(); }
+    void HideFind() { FindBar.Visibility = Visibility.Collapsed; FindCount.Text = ""; try { Cur?.Wv.Core?.Find.Stop(); } catch { } Cur?.Wv.Focus(); }
+    Wv findFor;
     void Find_Changed(object s, RoutedEventArgs e)
     {
-        var h = Cur?.Browser.GetBrowserHost(); if (h == null) return;
-        if (FindBox.Text == "") { h.StopFinding(true); FindCount.Text = ""; return; }
-        h.Find(FindBox.Text, true, FindCase.IsChecked == true, false);
+        var wv = Cur?.Wv; var f = wv?.Core?.Find; if (f == null) return;
+        if (FindBox.Text == "") { f.Stop(); FindCount.Text = ""; return; }
+        if (findFor != wv)
+        {
+            findFor = wv;
+            f.MatchCountChanged += (_, _) => UI.Run(ShowFindCount);
+            f.ActiveMatchIndexChanged += (_, _) => UI.Run(ShowFindCount);
+        }
+        var o = wv.Core.Environment.CreateFindOptions(); o.FindTerm = FindBox.Text; o.IsCaseSensitive = FindCase.IsChecked == true; o.ShouldHighlightAllMatches = true; o.SuppressDefaultFindDialog = true;
+        _ = f.StartAsync(o);
     }
-    void FindStep(bool fwd) { if (FindBox.Text != "") Cur?.Browser.GetBrowserHost()?.Find(FindBox.Text, fwd, FindCase.IsChecked == true, true); }
+    void ShowFindCount() { var f = Cur?.Wv.Core?.Find; if (f != null) OnFindResult(f.ActiveMatchIndex + 1, f.MatchCount); }
+    void FindStep(bool fwd) { if (FindBox.Text == "") return; var f = Cur?.Wv.Core?.Find; if (f == null) return; if (fwd) f.FindNext(); else f.FindPrevious(); }
     void Find_Key(object s, KeyEventArgs e)
     {
         if (e.Key == Key.Enter) { FindStep(Keyboard.Modifiers != ModifierKeys.Shift); e.Handled = true; }
@@ -617,11 +614,11 @@ public partial class MainWindow : Window
     // ---------------------------------------------------------------- actions
     public void Zoom(double delta, bool reset = false)
     {
-        var b = Cur?.Browser; if (b == null || !b.IsBrowserInitialized) return;
+        var b = Cur?.Wv; if (b == null || !b.Ready) return;
         b.ZoomLevel = reset ? 0 : Math.Clamp(b.ZoomLevel + delta, -5, 5);
         UpdateZoomLabel();
     }
-    public void Print() => Cur?.Browser.GetBrowserHost()?.Print();
+    public void Print() { try { Cur?.Wv.Core?.ShowPrintUI(Microsoft.Web.WebView2.Core.CoreWebView2PrintDialogKind.Browser); } catch { } }
     public async void SavePdf()
     {
         if (Cur == null) return;
@@ -629,14 +626,22 @@ public partial class MainWindow : Window
         if (dlg.ShowDialog(this) != true) return;
         await SavePdfTo(dlg.FileName);
     }
-    public Task<bool> SavePdfTo(string path) => Cur.Browser.PrintToPdfAsync(path, new PdfPrintSettings { BackgroundsEnabled = true });
-    public void DevTools() => Cur?.Browser.ShowDevTools();
+    public async Task<bool> SavePdfTo(string path)
+    {
+        var c = Cur?.Wv.Core; if (c == null) return false;
+        var ps = c.Environment.CreatePrintSettings(); ps.ShouldPrintBackgrounds = true;
+        try { return await c.PrintToPdfAsync(path, ps); } catch { return false; }
+    }
+    public void DevTools() { try { Cur?.Wv.Core?.OpenDevToolsWindow(); } catch { } }
     public void ViewSource() { if (Cur != null) NewTab("view-source:" + Cur.Url, true, Cur.Private, Cur); }
     public void OpenPrivateWindow(string url) { new MainWindow(true, url).Show(); }
-    public async Task ClearCache()
+    public Task ClearCache() => ClearBrowsingData(cookies: false);
+    /// <summary>Clears cached files, or cookies and other site data, for the normal profile (every normal window shares it).</summary>
+    public async Task ClearBrowsingData(bool cookies)
     {
-        var b = Tabs.FirstOrDefault(t => !t.Private)?.Browser;
-        if (b?.IsBrowserInitialized == true) { using var c = b.GetDevToolsClient(); await c.Network.ClearBrowserCacheAsync(); }
+        var p = Tabs.FirstOrDefault(t => !t.Private && t.Wv.Ready)?.Wv.Core.Profile; if (p == null) return;
+        var kinds = cookies ? Microsoft.Web.WebView2.Core.CoreWebView2BrowsingDataKinds.AllSite : Microsoft.Web.WebView2.Core.CoreWebView2BrowsingDataKinds.DiskCache | Microsoft.Web.WebView2.Core.CoreWebView2BrowsingDataKinds.CacheStorage;
+        try { await p.ClearBrowsingDataAsync(kinds); } catch { }
     }
 
     // fullscreen
@@ -685,7 +690,7 @@ public partial class MainWindow : Window
             case 76: FocusUrl(); break;
             case 70: ShowFind(); break;
             case 71: FindStep(!shift); break;
-            case 82: case 116: if (shift || vk == 116) Cur?.Browser.Reload(true); else Cur?.Browser.Reload(); break;
+            case 82: case 116: if (shift || vk == 116) Cur?.Wv.Reload(true); else Cur?.Wv.Reload(); break;
             case 68: ToggleBookmark(); break;
             case 72: ShowHistory(); break;
             case 74: ShowDownloads(); break;

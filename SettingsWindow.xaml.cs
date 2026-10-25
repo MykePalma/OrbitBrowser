@@ -4,7 +4,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
-using CefSharp;
 
 namespace Lite;
 
@@ -22,6 +21,7 @@ public partial class SettingsWindow : ThemedWindow
         LoadValues();
         Updater.Changed += SyncUpdate; Closed += (_, _) => Updater.Changed -= SyncUpdate;
         AdBlocker.Changed += SyncFilters; Closed += (_, _) => AdBlocker.Changed -= SyncFilters; SyncFilters();
+        Extensions.Changed += SyncExt; Closed += (_, _) => Extensions.Changed -= SyncExt; SyncExt();
         Nav.SelectedIndex = 0;
     }
 
@@ -36,7 +36,7 @@ public partial class SettingsWindow : ThemedWindow
         HomeBox.Text = s.Home == Store.NewTab ? "" : s.Home; HomeBox.Tag = null;
         TglRestore.IsChecked = s.Restore; TglBar.IsChecked = s.BookmarksBar; TglDark.IsChecked = s.DarkPages; TglAds.IsChecked = s.AdBlock; TglEasyList.IsChecked = s.BlockAds; TglEasyPrivacy.IsChecked = s.BlockTrackers;
         TglAsk.IsChecked = s.AskDownload; TglUpdate.IsChecked = s.AutoUpdate; DlDir.Text = s.DownloadDir;
-        AboutVersion.Text = "Version " + Updater.CurrentText; AboutEngine.Text = "Chromium " + Cef.ChromiumVersion + " · CefSharp " + Cef.CefSharpVersion; AboutData.Text = Store.Dir;
+        AboutVersion.Text = "Version " + Updater.CurrentText; AboutEngine.Text = "Chromium " + App.EngineVersion + " · Microsoft WebView2"; AboutData.Text = Store.Dir;
         SyncUpdate();
         loading = false;
     }
@@ -52,6 +52,7 @@ public partial class SettingsWindow : ThemedWindow
         PagePrivacy.Visibility = page == "Privacy" ? Visibility.Visible : Visibility.Collapsed;
         PageDownloads.Visibility = page == "Downloads" ? Visibility.Visible : Visibility.Collapsed;
         PageUpdates.Visibility = page == "Updates" ? Visibility.Visible : Visibility.Collapsed;
+        PageExtensions.Visibility = page == "Extensions" ? Visibility.Visible : Visibility.Collapsed;
         PageAbout.Visibility = page == "About" ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -108,7 +109,8 @@ public partial class SettingsWindow : ThemedWindow
     async void ClearCookies_Click(object sender, RoutedEventArgs e)
     {
         if (!ConfirmWindow.Ask(this, "Clear cookies and site data?", "You'll be signed out of most websites and saved site settings are removed.", "Clear cookies", destructive: true)) return;
-        await Cef.GetGlobalCookieManager().DeleteCookiesAsync("", ""); Flash("Cookies cleared");
+        foreach (var w in App.Browsers.ToList()) { await w.ClearBrowsingData(true); break; }   // all windows share one profile
+        Flash("Cookies cleared");
     }
     async void ClearCache_Click(object sender, RoutedEventArgs e)
     {
@@ -139,6 +141,55 @@ public partial class SettingsWindow : ThemedWindow
         UpdRestart.Visibility = Updater.Phase == UpdatePhase.Ready ? Visibility.Visible : Visibility.Collapsed;
         UpdNotes.Visibility = Updater.Latest?.PageUrl is { Length: > 0 } && Updater.Phase is UpdatePhase.Ready or UpdatePhase.Available ? Visibility.Visible : Visibility.Collapsed;
         UpdCheck.IsEnabled = Updater.Phase is not (UpdatePhase.Checking or UpdatePhase.Downloading);
+    }
+
+    // ---- extensions
+    void SyncExt()
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            ExtList.ItemsSource = null; ExtList.ItemsSource = Extensions.Loaded.ToList();
+            ExtEmpty.Visibility = Extensions.Loaded.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            UboInstall.Content = Extensions.IsUBlockInstalled ? "Reinstall" : "Install";
+        });
+    }
+    async Task ExtBusy(string status, Func<Task> work)
+    {
+        ExtProg.Visibility = Visibility.Visible; ExtStatus.Text = status; ExtStatus.Foreground = (System.Windows.Media.Brush)FindResource("Mut");
+        try { await work(); }
+        catch (Exception ex) { ExtStatus.Text = "That didn't work: " + ex.Message; ExtStatus.Foreground = (System.Windows.Media.Brush)FindResource("Danger"); ExtProg.Visibility = Visibility.Collapsed; return; }
+        ExtProg.Visibility = Visibility.Collapsed;
+    }
+    async void UboInstall_Click(object sender, RoutedEventArgs e)
+    {
+        UboInstall.IsEnabled = false;
+        await ExtBusy("Installing uBlock Originâ€¦", async () =>
+        {
+            var info = await Extensions.InstallUBlockAsync(m => ExtStatus.Text = m);
+            s.AdBlock = false; TglAds.IsChecked = false; Store.Save(); MainWindow.RefreshAll();    // uBlock Origin does this job now
+            ExtStatus.Text = info.Name + " " + info.Version + " is installed. Orbit's built-in blocker was turned off. Reload open pages to start blocking.";
+            Flash("uBlock Origin installed");
+        });
+        UboInstall.IsEnabled = true;
+    }
+    async void ExtFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var d = new Microsoft.Win32.OpenFolderDialog { Title = "Choose the extension's folder (the one with manifest.json)" };
+        if (d.ShowDialog(this) != true) return;
+        await ExtBusy("Adding extensionâ€¦", async () => { var i = await Extensions.InstallFromFolderAsync(d.FolderName); ExtStatus.Text = i.Name + " was added."; Flash("Extension added"); });
+    }
+    async void ExtZip_Click(object sender, RoutedEventArgs e)
+    {
+        var d = new Microsoft.Win32.OpenFileDialog { Filter = "Extension (*.zip)|*.zip", Title = "Choose an extension .zip" };
+        if (d.ShowDialog(this) != true) return;
+        await ExtBusy("Adding extensionâ€¦", async () => { var i = await Extensions.InstallFromZipAsync(d.FileName); ExtStatus.Text = i.Name + " was added."; Flash("Extension added"); });
+    }
+    void ExtOptions_Click(object sender, RoutedEventArgs e) { if (((Button)sender).Tag is ExtInfo x) main.NewTab("chrome-extension://" + x.Id + "/" + x.OptionsPage.TrimStart('/')); }
+    async void ExtRemove_Click(object sender, RoutedEventArgs e)
+    {
+        if (((Button)sender).Tag is not ExtInfo x) return;
+        if (!ConfirmWindow.Ask(this, "Remove " + x.Name + "?", "The extension and its saved settings are removed from Orbit.", "Remove", destructive: true)) return;
+        await Extensions.RemoveAsync(x); Flash(x.Name + " removed");
     }
 
     // ---- about

@@ -6,7 +6,6 @@ using System.Windows;
 using System.Windows.Automation.Peers;
 using System.Windows.Automation.Provider;
 using System.Windows.Controls;
-using CefSharp;
 
 namespace Lite;
 
@@ -20,7 +19,7 @@ static class SelfTest
     static byte[] FakeZip; static string FakeJson;
     static byte[] MakeZip(params (string name, string text)[] files) { using var ms = new MemoryStream(); using (var z = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, true)) foreach (var (n, tx) in files) { var e = z.CreateEntry(n); using var s = e.Open(); var b = System.Text.Encoding.UTF8.GetBytes(tx); s.Write(b); } return ms.ToArray(); }
     static string Release(string tag, byte[] zip, int port, string sha = null) => System.Text.Json.JsonSerializer.Serialize(new { tag_name = tag, html_url = "http://localhost/rel", body = "notes", assets = new[] { new { name = "Orbit-win-x64.zip", browser_download_url = $"http://localhost:{port}/updfiles/Orbit-win-x64.zip", size = zip.Length, digest = "sha256:" + (sha ?? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(zip)).ToLowerInvariant()) } } });
-    static async Task<string> Js(Tab t, string s) { var r = await t.Browser.EvaluateScriptAsync(s); return r.Success ? r.Result?.ToString() : "ERR:" + r.Message; }
+    static async Task<string> Js(Tab t, string s) { var r = await t.Wv.EvalAsync(s); if (r == null) return "ERR:eval"; if (r == "null") return null; return r.StartsWith('"') ? System.Text.Json.JsonSerializer.Deserialize<string>(r) : r; }
 
     const string Page = "<html><head><title>{0}</title></head><body><h1>{0}</h1><p>alpha beta alpha gamma alpha</p><a id=l href='/two' target=_blank>pop</a> <a id=d href='/file.bin' download>dl</a><img src='https://doubleclick.net/x.png' onerror='window.blocked=1'></body></html>";
 
@@ -41,13 +40,13 @@ static class SelfTest
         for (int k = 0; k < 14; k++) { var s = sites[k % sites.Length]; Store.D.History.Add(new HistoryItem { Title = s[0], Url = s[1] + (k > 7 ? "?p=" + k : ""), Time = now.AddHours(-k * (k < 6 ? 0.7 : 9)) }); }
         Store.D.Folders.AddRange(new[] { "Work", "Work/Design", "Reading" });
         Store.D.Bookmarks.AddRange(new[] { new Bookmark { Title = "Orbit on GitHub", Url = "https://github.com/MykePalma/OrbitBrowser" }, new Bookmark { Title = "WCAG 2.2 overview", Url = "https://www.w3.org/WAI/standards-guidelines/wcag/new-in-22/", Folder = "Work/Design" }, new Bookmark { Title = "Fluent 2 typography", Url = "https://fluent2.microsoft.design/typography", Folder = "Work/Design" }, new Bookmark { Title = "Wikipedia", Url = "https://en.wikipedia.org/", Folder = "Reading" } });
-        DownloadsWindow.Add(1, "x", @"C:\Users\you\Downloads\Orbit-win-x64.zip"); DownloadsWindow.Update(1, 120_000_000, 266_000_000, 45, false, false, "", null);
-        DownloadsWindow.Add(2, "x", @"C:\Users\you\Downloads\quarterly-report.pdf"); DownloadsWindow.Update(2, 2_400_000, 2_400_000, 100, true, false, "", null);
-        DownloadsWindow.Add(3, "x", @"C:\Users\you\Downloads\holiday-photos.zip"); DownloadsWindow.Update(3, 10, 1000, 1, false, true, "", null);
+        DownloadsWindow.Add(1, "x", @"C:\Users\you\Downloads\Orbit-win-x64.zip"); DownloadsWindow.Update(1, 120_000_000, 266_000_000, 45, false, false, "");
+        DownloadsWindow.Add(2, "x", @"C:\Users\you\Downloads\quarterly-report.pdf"); DownloadsWindow.Update(2, 2_400_000, 2_400_000, 100, true, false, "");
+        DownloadsWindow.Add(3, "x", @"C:\Users\you\Downloads\holiday-photos.zip"); DownloadsWindow.Update(3, 10, 1000, 1, false, true, "");
         MainWindow.RefreshAll(); await Task.Delay(300);
 
         w.ShowSettings(); var sw = Application.Current.Windows.OfType<SettingsWindow>().First(); await Task.Delay(600);
-        foreach (var page in new[] { "General", "Appearance", "Privacy", "Downloads", "Updates", "About" }) { sw.ShowPage(page); await Task.Delay(400); Shot(sw, "settings-" + page.ToLower()); }
+        foreach (var page in new[] { "General", "Appearance", "Privacy", "Extensions", "Downloads", "Updates", "About" }) { sw.ShowPage(page); await Task.Delay(400); Shot(sw, "settings-" + page.ToLower()); }
         sw.Close();
         w.ShowHistory(); var hw = Application.Current.Windows.OfType<HistoryWindow>().First(); await Task.Delay(700); Shot(hw, "history"); hw.Close();
         w.ShowDownloads(); var dw = Application.Current.Windows.OfType<DownloadsWindow>().First(); await Task.Delay(600); Shot(dw, "downloads");
@@ -74,8 +73,41 @@ static class SelfTest
         await Task.Delay(40000);
     }
 
+    /// <summary>Installs uBlock Origin from GitHub into the profile and checks that it really blocks ad and tracker requests.</summary>
+    static async Task ExtTest(MainWindow w)
+    {
+        try
+        {
+            await Task.Delay(2000);
+            Store.D.Settings.AdBlock = false;    // measure the extension on its own
+            string[] urls = { "https://ads.pubmatic.com/AdServer/js/showad.js", "https://connect.facebook.net/en_US/fbevents.js", "https://static.criteo.net/js/ld/publishertag.js", "https://ib.adnxs.com/ut/v3/prebid", "https://securepubads.g.doubleclick.net/pagead/ads" };
+            var probe = "window.__r={};" + System.Text.Json.JsonSerializer.Serialize(urls) + ".forEach(function(u){fetch(u,{mode:'no-cors',cache:'no-store'}).then(function(){__r[u]='ok'}).catch(function(){__r[u]='blocked'})});'started'";
+            async Task<int> Blocked()
+            {
+                w.Navigate("https://example.com/"); await Until(() => !w.Cur.Loading && w.Cur.Url.Contains("example.com"), 15000); await Task.Delay(1500);
+                await Js(w.Cur, probe); await Task.Delay(6000);
+                var r = await Js(w.Cur, "JSON.stringify(window.__r)"); log.Add("INFO probe: " + r);
+                return r == null ? -1 : System.Text.RegularExpressions.Regex.Matches(r, "\"blocked\"").Count;
+            }
+            int before = await Blocked();
+            R("ext: control - nothing is blocked without the extension", before == 0, "blocked=" + before);
+            ExtInfo info = null;
+            try { info = await Extensions.InstallUBlockAsync(s => log.Add("INFO " + s)); } catch (Exception ex) { log.Add("INFO install failed: " + ex.Message); }
+            R("ext: uBlock Origin installs", info != null, info == null ? "" : info.Name + " " + info.Version);
+            var list = await w.Cur.Wv.Core.Profile.GetBrowserExtensionsAsync();
+            R("ext: listed and enabled", list.Any(x => x.IsEnabled && x.Name.StartsWith("uBlock")), string.Join(", ", list.Select(x => x.Name + (x.IsEnabled ? "" : " (off)"))));
+            await Task.Delay(12000);   // let the extension finish its first start
+            int after = await Blocked();
+            R("ext: uBlock Origin blocks ad and tracker requests", after >= 4, $"blocked={after} of {urls.Length}");
+        }
+        catch (Exception ex) { log.Add("FAIL ext test crashed: " + ex); }
+        File.WriteAllLines(Path.Combine(Store.Dir, "selftest.log"), log);
+        Application.Current.Shutdown();
+    }
+
     public static async Task Run(MainWindow w)
     {
+        if (App.SelfTest == "--selftest-ext") { await ExtTest(w); return; }
         if (App.SelfTest == "--selftest-ads")
         {
             await Task.Delay(1500); Store.D.Settings.AdBlock = true; await AdBlocker.UpdateAsync();
@@ -157,7 +189,7 @@ static class SelfTest
             // suggestions
             w.UrlBox.Focus(); w.UrlBox.Text = "one"; await Task.Delay(300);
             R("suggestion popup", w.SuggPopup.IsOpen && w.SuggList.Items.Count > 1, "items=" + w.SuggList.Items.Count);
-            w.SuggPopup.IsOpen = false; t0.Browser.Focus();
+            w.SuggPopup.IsOpen = false; t0.Wv.Focus();
 
             // bookmarks
             Click(w.StarBtn); await Task.Delay(400); R("bookmark add", Store.D.Bookmarks.Any(b => b.Url == U("one")) && (string)w.StarBtn.Content == "★", $"cur={w.Cur?.Url} bms={string.Join('|', Store.D.Bookmarks.Select(b => b.Url))} star={w.StarBtn.Content}");
@@ -172,14 +204,14 @@ static class SelfTest
             w.FindBox.Text = ""; w.FindBar.Visibility = Visibility.Collapsed; w.FindCase.IsChecked = false;
 
             // zoom
-            w.Zoom(0.5); await Task.Delay(200); R("zoom in", t0.Browser.ZoomLevel > 0.4 && w.ZoomLbl.Text != "", w.ZoomLbl.Text);
-            w.Zoom(-1); R("zoom out", t0.Browser.ZoomLevel < 0, "" + t0.Browser.ZoomLevel);
-            w.Zoom(0, true); R("zoom reset", t0.Browser.ZoomLevel == 0 && w.ZoomLbl.Text == "");
+            w.Zoom(0.5); await Task.Delay(200); R("zoom in", t0.Wv.ZoomLevel > 0.4 && w.ZoomLbl.Text != "", w.ZoomLbl.Text);
+            w.Zoom(-1); R("zoom out", t0.Wv.ZoomLevel < 0, "" + t0.Wv.ZoomLevel);
+            w.Zoom(0, true); R("zoom reset", t0.Wv.ZoomLevel == 0 && w.ZoomLbl.Text == "");
 
             // tabs
             var t1 = w.NewTab(U("tab1")); await Until(() => t1.Title == "tab1");
             R("new tab selected", w.Cur == t1 && w.Tabs.Count == 2);
-            R("tab visibility", t1.Browser.Visibility == Visibility.Visible && t0.Browser.Visibility == Visibility.Hidden);
+            R("tab visibility", t1.Wv.Visibility == Visibility.Visible && t0.Wv.Visibility == Visibility.Hidden);
             w.HandleShortcut(9, true, false, false); R("ctrl+tab switches", w.Cur == t0);
             w.HandleShortcut(49, true, false, false); R("ctrl+1", w.Cur == t0);
             w.HandleShortcut(57, true, false, false); R("ctrl+9 last", w.Cur == t1);
@@ -194,7 +226,7 @@ static class SelfTest
 
             // popups via target=_blank
             w.TabList.SelectedItem = t0; await Task.Delay(300); int before = w.Tabs.Count;
-            var rect = await Js(t0, "(function(){var r=document.getElementById('l').getBoundingClientRect();return Math.round(r.x+r.width/2)+','+Math.round(r.y+r.height/2)})()"); var xy = rect.Split(',').Select(int.Parse).ToArray(); var hst = t0.Browser.GetBrowserHost(); hst.SendMouseMoveEvent(xy[0], xy[1], false, CefEventFlags.None); hst.SendMouseClickEvent(xy[0], xy[1], MouseButtonType.Left, false, 1, CefEventFlags.None); await Task.Delay(60); hst.SendMouseClickEvent(xy[0], xy[1], MouseButtonType.Left, true, 1, CefEventFlags.None); R("target=_blank opens tab", await Until(() => w.Tabs.Count == before + 1), $"{before}->{w.Tabs.Count}");
+            var rect = await Js(t0, "(function(){var r=document.getElementById('l').getBoundingClientRect();return Math.round(r.x+r.width/2)+','+Math.round(r.y+r.height/2)})()"); var xy = rect.Split(',').Select(int.Parse).ToArray(); await t0.Wv.ClickAt(xy[0], xy[1]); R("target=_blank opens tab", await Until(() => w.Tabs.Count == before + 1), $"{before}->{w.Tabs.Count}");
             // adblock
             await Task.Delay(500); R("adblock blocks tracker", await Js(t0, "String(window.blocked)") == "1", await Js(t0, "String(window.blocked)"));
 
@@ -208,7 +240,7 @@ static class SelfTest
             // downloads
             w.TabList.SelectedItem = t0; await Task.Delay(300);
             await Js(t0, "document.getElementById('d').click()");
-            R("download completes", await Until(() => DownloadsWindow.Items.Count > 0 && DownloadsWindow.Items[0].Done, 10000), DownloadsWindow.Items.FirstOrDefault()?.Status ?? "none");
+            R("download completes", await Until(() => DownloadsWindow.Items.Count > 0 && DownloadsWindow.Items[0].Done, 25000), DownloadsWindow.Items.FirstOrDefault()?.Status ?? "none");
             R("download file saved", DownloadsWindow.Items.Count > 0 && File.Exists(DownloadsWindow.Items[0].Path), DownloadsWindow.Items.FirstOrDefault()?.Path);
 
             // windows
@@ -314,11 +346,11 @@ static class SelfTest
               R("adblock browser: the ad box is hidden, real content stays", boxDisp == "none" && contentDisp != "none", $"box={boxDisp} content={contentDisp}");
               R("adblock browser: the blocked count is tracked", at.BlockedCount == 2, "count=" + at.BlockedCount);
               w.TabList.SelectedItem = at; await Task.Delay(500); R("adblock browser: shield shows the count", w.ShieldBtn.Visibility == Visibility.Visible && w.ShieldCount.Text == "2", w.ShieldCount.Text);
-              AdBlocker.SetPaused("localhost", true); at.Browser.Reload(true); await Task.Delay(3000);
+              AdBlocker.SetPaused("localhost", true); at.Wv.Reload(true); await Task.Delay(3000);
               imgLoaded = await Js(at, "String(window.imgLoaded)"); trk = await Js(at, "String(window.trk)"); boxDisp = await Js(at, "getComputedStyle(document.getElementById('b')).display");
               R("adblock browser: pausing a site lets everything load", imgLoaded == "1" && trk == "1" && boxDisp != "none" && at.BlockedCount == 0, $"loaded={imgLoaded} trk={trk} box={boxDisp} count={at.BlockedCount}");
               R("adblock browser: shield shows the paused state", w.ShieldIcon.Kind == MaterialDesignThemes.Wpf.PackIconKind.ShieldOffOutline && w.ShieldCount.Text == "");
-              AdBlocker.SetPaused("localhost", false); Store.D.Settings.AdBlock = false; at.Browser.Reload(true); await Task.Delay(3000);
+              AdBlocker.SetPaused("localhost", false); Store.D.Settings.AdBlock = false; at.Wv.Reload(true); await Task.Delay(3000);
               imgLoaded = await Js(at, "String(window.imgLoaded)"); trk = await Js(at, "String(window.trk)");
               R("adblock browser: switching the blocker off lets everything load", imgLoaded == "1" && trk == "1" && at.BlockedCount == 0, $"loaded={imgLoaded} trk={trk}");
               Store.D.Settings.AdBlock = true; AdBlocker.UseEngine(AdBlocker.Build()); w.CloseTab(at); }
@@ -364,13 +396,13 @@ static class SelfTest
             w.TabList.SelectedItem = t0; await Task.Delay(200);
             w.ToggleSplit(); await Task.Delay(500);
             var sp = w.Cur; R("split opens partner tab", w.Tabs.Count == 2 && sp != t0 && sp.Partner == t0 && t0.Partner == sp);
-            R("split: both visible side by side", t0.Browser.Visibility == Visibility.Visible && sp.Browser.Visibility == Visibility.Visible && Grid.GetColumn(t0.Browser) == 0 && Grid.GetColumn(sp.Browser) == 2 && w.Splitter.Visibility == Visibility.Visible);
+            R("split: both visible side by side", t0.Wv.Visibility == Visibility.Visible && sp.Wv.Visibility == Visibility.Visible && Grid.GetColumn(t0.Wv) == 0 && Grid.GetColumn(sp.Wv) == 2 && w.Splitter.Visibility == Visibility.Visible);
             w.Navigate(U("right")); R("split: right pane navigates", await Until(() => sp.Title == "right"), sp.Title);
-            w.TabList.SelectedItem = t0; await Task.Delay(300); R("split: focusing left keeps both", sp.Browser.Visibility == Visibility.Visible && w.Cur == t0);
-            R("split: panes have real width", t0.Browser.ActualWidth > 200 && sp.Browser.ActualWidth > 200 && Math.Abs(t0.Browser.ActualWidth - sp.Browser.ActualWidth) < 20, $"{t0.Browser.ActualWidth:0}/{sp.Browser.ActualWidth:0}");
-            var other = w.NewTab(U("solo")); await Until(() => other.Title == "solo"); R("split: other tab shows alone", other.Browser.Visibility == Visibility.Visible && t0.Browser.Visibility == Visibility.Hidden && sp.Browser.Visibility == Visibility.Hidden && w.Splitter.Visibility == Visibility.Collapsed && Grid.GetColumnSpan(other.Browser) == 3);
-            w.TabList.SelectedItem = sp; await Task.Delay(300); R("split: partner restores pair", t0.Browser.Visibility == Visibility.Visible && sp.Browser.Visibility == Visibility.Visible);
-            w.EndSplit(sp); await Task.Delay(200); R("close split view", t0.Partner == null && sp.Partner == null && t0.Browser.Visibility == Visibility.Hidden && Grid.GetColumnSpan(sp.Browser) == 3);
+            w.TabList.SelectedItem = t0; await Task.Delay(300); R("split: focusing left keeps both", sp.Wv.Visibility == Visibility.Visible && w.Cur == t0);
+            R("split: panes have real width", t0.Wv.ActualWidth > 200 && sp.Wv.ActualWidth > 200 && Math.Abs(t0.Wv.ActualWidth - sp.Wv.ActualWidth) < 20, $"{t0.Wv.ActualWidth:0}/{sp.Wv.ActualWidth:0}");
+            var other = w.NewTab(U("solo")); await Until(() => other.Title == "solo"); R("split: other tab shows alone", other.Wv.Visibility == Visibility.Visible && t0.Wv.Visibility == Visibility.Hidden && sp.Wv.Visibility == Visibility.Hidden && w.Splitter.Visibility == Visibility.Collapsed && Grid.GetColumnSpan(other.Wv) == 3);
+            w.TabList.SelectedItem = sp; await Task.Delay(300); R("split: partner restores pair", t0.Wv.Visibility == Visibility.Visible && sp.Wv.Visibility == Visibility.Visible);
+            w.EndSplit(sp); await Task.Delay(200); R("close split view", t0.Partner == null && sp.Partner == null && t0.Wv.Visibility == Visibility.Hidden && Grid.GetColumnSpan(sp.Wv) == 3);
             w.StartSplit(t0, other); R("split with chosen tab", t0.Partner == other && other.Partner == t0);
             w.CloseTab(other); R("closing a split tab unpairs", t0.Partner == null);
             w.CloseTab(sp);

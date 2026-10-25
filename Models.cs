@@ -6,9 +6,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using CefSharp;
 using MaterialDesignThemes.Wpf;
-using CefSharp.Wpf.HwndHost;
 
 namespace Lite;
 
@@ -164,7 +162,7 @@ public static class Store
         input = (input ?? "").Trim();
         if (input == "") return Real(D.Settings.Home);
         if (input.StartsWith("lite://")) return Real(input);
-        if (System.Text.RegularExpressions.Regex.IsMatch(input, @"^(https?|file|about|data|view-source|chrome|devtools|blob|ftp):", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) return input;
+        if (System.Text.RegularExpressions.Regex.IsMatch(input, @"^(https?|file|about|data|view-source|chrome|chrome-extension|edge|devtools|blob|ftp):", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) return input;
         if (System.Text.RegularExpressions.Regex.IsMatch(input, @"^(localhost|(\d{1,3}\.){3}\d{1,3})(:\d+)?([/?#].*)?$")) return "http://" + input;
         if (!input.Contains(' ') && System.Text.RegularExpressions.Regex.IsMatch(input, @"^[^\s/]+\.[a-zA-Z]{2,}(:\d+)?([/?#].*)?$")) return "https://" + input;
         return D.Settings.Engine.Replace("%s", Uri.EscapeDataString(input));
@@ -197,7 +195,7 @@ b{{display:block;font-size:22px;margin-bottom:6px;color:#8ab4f8}}</style>
 
 public class Tab : INotifyPropertyChanged
 {
-    public ChromiumWebBrowser Browser;
+    public Wv Wv;
     public bool Private;
     /// <summary>Tab shown side by side with this one (split view); links are always mutual.</summary>
     Tab partner; public Tab Partner { get => partner; set { partner = value; P(); P(nameof(SplitVis)); } }
@@ -266,9 +264,14 @@ public class Tab : INotifyPropertyChanged
     public string FaviconB64 = "";
     public async void LoadFavicon(string u, Action<string> done = null)
     {
+        try { SetFavicon(await http.GetByteArrayAsync(u), done); }
+        catch { Favicon = null; FaviconB64 = ""; }
+    }
+    /// <summary>Decodes an icon (png/ico/...) and shows it on the tab.</summary>
+    public void SetFavicon(byte[] bytes, Action<string> done = null)
+    {
         try
         {
-            var bytes = await http.GetByteArrayAsync(u);
             // .ico files hold several sizes: pick the one closest to 32px instead of letting WPF guess
             var dec = BitmapDecoder.Create(new MemoryStream(bytes), BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
             var frame = dec.Frames.OrderBy(f => Math.Abs(f.PixelWidth - 32)).First();
@@ -287,7 +290,7 @@ public class DownloadEntry : INotifyPropertyChanged
     public event PropertyChangedEventHandler PropertyChanged;
     void P([CallerMemberName] string n = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
     public int Id; public string Url = "";
-    public IDownloadItemCallback Callback;
+    public Action PauseFn, ResumeFn, CancelFn;
     string name = ""; public string Name { get => name; set { name = value; P(); P(nameof(FileKind)); } }
     string path = ""; public string Path { get => path; set { path = value; P(); } }
     long rec, tot; double pct; bool done, canceled, paused;

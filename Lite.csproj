@@ -21,7 +21,7 @@
     <Resource Include="Assets\orbit-256.png" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="CefSharp.Wpf.HwndHost" Version="154.0.340" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
     <PackageReference Include="MaterialDesignThemes" Version="5.4.0" />
   </ItemGroup>
 </Project>
