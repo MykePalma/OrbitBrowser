@@ -23,6 +23,7 @@ public partial class App : Application
         {
             Updater.LaunchInstaller(staged); Shutdown(); return;
         }
+        if (!Store.IsTestRun) RemoveOldEngineFiles();
         string runtime = null;
         try { runtime = CoreWebView2Environment.GetAvailableBrowserVersionString(); } catch { }
         if (string.IsNullOrEmpty(runtime))
@@ -37,6 +38,20 @@ public partial class App : Application
         var urls = e.Args.Where(x => !x.StartsWith("--")).ToList();
         var w = new MainWindow(false, urls.FirstOrDefault());
         w.Show();
+    }
+
+    /// <summary>Orbit 1.0.x shipped its own copy of Chromium (about 250 MB). An update installs over the old folder without deleting it, so the leftovers are cleared out here.</summary>
+    static void RemoveOldEngineFiles()
+    {
+        try
+        {
+            var dir = AppContext.BaseDirectory;
+            foreach (var f in new[] { "libcef.dll", "chrome_elf.dll", "icudtl.dat", "snapshot_blob.bin", "v8_context_snapshot.bin", "resources.pak", "chrome_100_percent.pak", "chrome_200_percent.pak", "d3dcompiler_47.dll", "libEGL.dll", "libGLESv2.dll", "vk_swiftshader.dll", "vk_swiftshader_icd.json", "vulkan-1.dll", "dxcompiler.dll", "dxil.dll", "CefSharp.dll", "CefSharp.Core.dll", "CefSharp.Core.Runtime.dll", "CefSharp.Wpf.HwndHost.dll", "CefSharp.BrowserSubprocess.exe", "CefSharp.BrowserSubprocess.Core.dll", "CefSharp.BrowserSubprocess.dll", "CefSharp.Wpf.dll", "CefSharp.Core.xml", "CefSharp.xml", "CefSharp.Wpf.HwndHost.xml", "bootstrapper.exe" })
+                try { var p = Path.Combine(dir, f); if (File.Exists(p)) File.Delete(p); } catch { }
+            foreach (var d in new[] { "locales", "swiftshader" })
+                try { var p = Path.Combine(dir, d); if (Directory.Exists(p)) Directory.Delete(p, true); } catch { }
+        }
+        catch { }
     }
 
     static Task<CoreWebView2Environment> CreateEnvironment()

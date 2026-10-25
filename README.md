@@ -2,17 +2,17 @@
 
 <img src="Assets/orbit.svg" width="72" align="right" alt="Orbit logo">
 
-A lightweight Windows browser built on Chromium (through [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)), with a custom title bar, split view, bookmark folders, Chrome extensions and a dark interface.
+A lightweight Windows browser built on [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/), the Chromium-based engine that powers Edge, with a custom title bar, split view, bookmark folders, Chrome extensions and a dark interface.
 
 ### [⬇ Download Orbit for Windows](https://github.com/MykePalma/OrbitBrowser/releases/latest/download/Orbit-win-x64.zip)
 
-Unzip anywhere and run `Orbit.exe`. No installer, and no .NET install needed (the .NET runtime is included). Windows 10 or 11, 64-bit. The download is about 75 MB: the Chromium engine comes from the Microsoft Edge WebView2 Runtime that Windows already includes (Orbit offers to open its download page if a computer doesn't have it).
+Unzip anywhere and run `Orbit.exe`. No installer, and no .NET install needed (the .NET runtime is included). Windows 10 or 11, 64-bit. The download is about 75 MB: the browser engine comes from the Microsoft Edge WebView2 Runtime that Windows already includes (Orbit offers to open its download page if a computer doesn't have it).
 
 ![Orbit new tab page](docs/screenshot.png)
 
 ## Features
 
-- **Real Chromium engine**: GPU-accelerated rendering, the same web compatibility as Chrome, and H.264 / AAC video. The engine updates itself through Windows.
+- **Microsoft Edge WebView2 engine**: GPU-accelerated rendering, the same web compatibility as Chrome, and H.264 / AAC video. The engine updates itself through Windows.
 - **Extensions**: add Chrome extensions straight from the Chrome Web Store ("Add to Orbit" bar), a folder or a zip, or install **uBlock Origin** in one click. They appear as icons next to the address bar, with their pop-ups, and the Web Store ones and uBlock Origin keep themselves up to date.
 - **Custom title bar**: tabs sit in the window frame to give pages as much room as possible.
 - **Tabs**: drag to reorder, drag a tab out to open it in its own window (or drop it into another Orbit window), pin, mute, duplicate, reopen closed tabs, session restore.
