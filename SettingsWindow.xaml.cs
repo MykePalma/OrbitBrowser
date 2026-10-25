@@ -21,6 +21,7 @@ public partial class SettingsWindow : ThemedWindow
         toastTimer.Tick += (_, _) => { toastTimer.Stop(); Toast.Visibility = Visibility.Collapsed; };
         LoadValues();
         Updater.Changed += SyncUpdate; Closed += (_, _) => Updater.Changed -= SyncUpdate;
+        AdBlocker.Changed += SyncFilters; Closed += (_, _) => AdBlocker.Changed -= SyncFilters; SyncFilters();
         Nav.SelectedIndex = 0;
     }
 
@@ -33,7 +34,7 @@ public partial class SettingsWindow : ThemedWindow
         var match = Engines.Children.OfType<RadioButton>().FirstOrDefault(r => (string)r.Tag == s.Engine && (string)r.Tag != "custom");
         if (match != null) match.IsChecked = true; else { EngineCustom.IsChecked = true; CustomEngine.Text = s.Engine; CustomBox.Visibility = Visibility.Visible; }
         HomeBox.Text = s.Home == Store.NewTab ? "" : s.Home; HomeBox.Tag = null;
-        TglRestore.IsChecked = s.Restore; TglBar.IsChecked = s.BookmarksBar; TglDark.IsChecked = s.DarkPages; TglAds.IsChecked = s.AdBlock;
+        TglRestore.IsChecked = s.Restore; TglBar.IsChecked = s.BookmarksBar; TglDark.IsChecked = s.DarkPages; TglAds.IsChecked = s.AdBlock; TglEasyList.IsChecked = s.BlockAds; TglEasyPrivacy.IsChecked = s.BlockTrackers;
         TglAsk.IsChecked = s.AskDownload; TglUpdate.IsChecked = s.AutoUpdate; DlDir.Text = s.DownloadDir;
         AboutVersion.Text = "Version " + Updater.CurrentText; AboutEngine.Text = "Chromium " + Cef.ChromiumVersion + " · CefSharp " + Cef.CefSharpVersion; AboutData.Text = Store.Dir;
         SyncUpdate();
@@ -85,6 +86,18 @@ public partial class SettingsWindow : ThemedWindow
 
     // ---- privacy
     void Ads_Click(object sender, RoutedEventArgs e) { s.AdBlock = TglAds.IsChecked == true; Save(); }
+    void EasyList_Click(object sender, RoutedEventArgs e) { s.BlockAds = TglEasyList.IsChecked == true; Save(); _ = ApplyLists(); }
+    void EasyPrivacy_Click(object sender, RoutedEventArgs e) { s.BlockTrackers = TglEasyPrivacy.IsChecked == true; Save(); _ = ApplyLists(); }
+    /// <summary>After a list is switched on or off: download it if it isn't saved yet, then rebuild the rules.</summary>
+    async Task ApplyLists() { if (AdBlocker.Lists.Any(l => l.Enabled(s) && !File.Exists(Path.Combine(AdBlocker.Dir, l.File)))) await AdBlocker.UpdateAsync(); else await AdBlocker.RebuildAsync(); }
+    async void FilterUpdate_Click(object sender, RoutedEventArgs e) { FilterUpdate.IsEnabled = false; var ok = await AdBlocker.UpdateAsync(); FilterUpdate.IsEnabled = true; Flash(ok ? "Filter lists updated" : "Couldn't update every list"); }
+    void Resume_Click(object sender, RoutedEventArgs e) { if (((Button)sender).Tag is string host) { AdBlocker.SetPaused(host, false); Flash("Blocking resumed on " + host); } }
+    void SyncFilters()
+    {
+        FilterStatus.Text = string.IsNullOrEmpty(AdBlocker.Message) ? "Filter lists load when Orbit starts." : AdBlocker.Message;
+        FilterProg.Visibility = AdBlocker.Busy ? Visibility.Visible : Visibility.Collapsed; FilterProg.IsIndeterminate = AdBlocker.Busy; FilterUpdate.IsEnabled = !AdBlocker.Busy;
+        PausedList.ItemsSource = null; PausedList.ItemsSource = s.AdAllow.ToList(); PausedEmpty.Visibility = s.AdAllow.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
     void ClearHistory_Click(object sender, RoutedEventArgs e)
     {
         int n = Store.D.History.Count;

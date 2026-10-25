@@ -198,22 +198,42 @@ class TabRequest : RequestHandler
         return true;
     }
 
-    static readonly string[] Block = { "doubleclick.net", "googlesyndication.com", "googleadservices.com", "google-analytics.com", "googletagmanager.com", "adservice.google.com", "facebook.net", "adnxs.com", "taboola.com", "outbrain.com", "scorecardresearch.com", "criteo.com", "amazon-adsystem.com", "moatads.com", "quantserve.com", "hotjar.com", "adsrvr.org", "pubmatic.com", "rubiconproject.com", "openx.net" };
+    readonly Tab tab; readonly MainWindow win; readonly Ads ads;
+    public TabRequest(Tab t, MainWindow w) { tab = t; win = w; ads = new Ads(t, w); }
+
+    /// <summary>Stops requests that match the filter lists (EasyList / EasyPrivacy); everything else goes through untouched.</summary>
     class Ads : CefSharp.Handler.ResourceRequestHandler
     {
+        readonly Tab t; readonly MainWindow w;
+        public Ads(Tab t, MainWindow w) { this.t = t; this.w = w; }
+
+        static ReqType Map(ResourceType r) => r switch
+        {
+            ResourceType.SubFrame => ReqType.SubDocument, ResourceType.Stylesheet => ReqType.Stylesheet, ResourceType.Script => ReqType.Script,
+            ResourceType.Image or ResourceType.Favicon => ReqType.Image, ResourceType.FontResource => ReqType.Font, ResourceType.Object or ResourceType.PluginResource => ReqType.Object,
+            ResourceType.Media => ReqType.Media, ResourceType.Xhr => ReqType.Xhr, ResourceType.Ping => ReqType.Ping, _ => ReqType.Other
+        };
+
         protected override CefReturnValue OnBeforeResourceLoad(IWebBrowser b, IBrowser br, IFrame f, IRequest r, IRequestCallback cb)
         {
-            if (!Store.D.Settings.AdBlock || r.ResourceType == ResourceType.MainFrame) return CefReturnValue.Continue;
             try
             {
-                var h = new Uri(r.Url).Host;
-                if (Block.Any(x => h == x || h.EndsWith("." + x))) return CefReturnValue.Cancel;
+                if (r.ResourceType == ResourceType.MainFrame) { lock (t.BlockedUrls) t.BlockedUrls.Clear(); t.BlockedCount = 0; Notify(); return CefReturnValue.Continue; }   // a new page: start counting again
+                if (!Store.D.Settings.AdBlock) return CefReturnValue.Continue;
+                var url = r.Url; if (url.Length < 8 || !url.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return CefReturnValue.Continue;
+                var top = t.Host; if (AdBlocker.IsPaused(top)) return CefReturnValue.Continue;
+                string doc = top;
+                var fu = f?.Url; if (!string.IsNullOrEmpty(fu) && fu.StartsWith("http")) { try { doc = new Uri(fu).Host; } catch { } }
+                bool hit = AdBlocker.Engine.ShouldBlock(url, doc, Map(r.ResourceType)); AdBlocker.Trace?.Enqueue((hit ? "BLOCK " : "allow ") + r.ResourceType + " " + doc + " <- " + url);
+                if (hit) { bool added; lock (t.BlockedUrls) { added = t.BlockedUrls.Add(url); t.BlockedCount = t.BlockedUrls.Count; } if (added) Notify(); return CefReturnValue.Cancel; }
             }
             catch { }
             return CefReturnValue.Continue;
         }
+
+        void Notify() { if (Interlocked.Exchange(ref t.BlockedDirty, 1) == 0) UI.Run(() => { t.BlockedDirty = 0; w.OnBlocked(t); }); }   // at most one UI update in flight
     }
-    static readonly Ads ads = new();
+
     protected override IResourceRequestHandler GetResourceRequestHandler(IWebBrowser b, IBrowser br, IFrame f, IRequest r, bool nav, bool dl, string initiator, ref bool disable)
         => Store.D.Settings.AdBlock ? ads : null;
 
@@ -261,4 +281,26 @@ class TabFocus : FocusHandler
     readonly Tab t; readonly MainWindow w;
     public TabFocus(Tab t, MainWindow w) { this.t = t; this.w = w; }
     protected override void OnGotFocus(IWebBrowser b, IBrowser br) => UI.Run(() => w.OnPaneFocus(t));
+}
+
+/// <summary>Hides the leftover ad boxes: injects the filter lists' element-hiding CSS as soon as a page's script context exists.</summary>
+class CosmeticInjector : IRenderProcessMessageHandler
+{
+    readonly Tab t;
+    public CosmeticInjector(Tab t) { this.t = t; }
+    public void OnContextCreated(IWebBrowser b, IBrowser br, IFrame frame)
+    {
+        try
+        {
+            if (!Store.D.Settings.AdBlock) return;
+            var url = frame.Url; if (string.IsNullOrEmpty(url) || !url.StartsWith("http")) url = t.Url; if (!url.StartsWith("http")) return;
+            var host = new Uri(url).Host; if (AdBlocker.IsPaused(t.Host) || AdBlocker.IsPaused(host)) return;
+            var css = AdBlocker.Engine.CosmeticCss(host); if (css.Length == 0) return;
+            frame.ExecuteJavaScriptAsync("(function(c){function add(){var r=document.documentElement;if(!r)return false;var s=document.createElement('style');s.setAttribute('data-orbit-adblock','1');s.textContent=c;r.appendChild(s);return true}if(!add()){var o=new MutationObserver(function(){if(add())o.disconnect()});o.observe(document,{childList:true})}})(" + System.Text.Json.JsonSerializer.Serialize(css) + ")");
+        }
+        catch { }
+    }
+    public void OnContextReleased(IWebBrowser b, IBrowser br, IFrame frame) { }
+    public void OnFocusedNodeChanged(IWebBrowser b, IBrowser br, IFrame frame, IDomNode node) { }
+    public void OnUncaughtException(IWebBrowser b, IBrowser br, IFrame frame, JavascriptException exception) { }
 }

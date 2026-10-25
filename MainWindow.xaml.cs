@@ -64,6 +64,7 @@ public partial class MainWindow : Window
             if (restoring) { foreach (var u in Store.D.Session.ToList()) NewTab(u, false); TabList.SelectedIndex = Tabs.Count - 1; }
             if (startUrl != null || !restoring) NewTab(startUrl);   // a URL given on the command line opens in addition to the restored tabs
             if (App.SelfTest != null && !priv && first) _ = SelfTest.Run(this);
+            if (first && !Store.IsTestRun) _ = Task.Run(() => AdBlocker.InitAsync());
             if (first && !priv && Updater.ShouldAutoCheck()) _ = Task.Delay(4000).ContinueWith(_ => Updater.CheckAsync(download: true));
         };
     }
@@ -77,7 +78,7 @@ public partial class MainWindow : Window
         t.Browser = b;
         b.DisplayHandler = new TabDisplay(t, this); b.LifeSpanHandler = new TabLifeSpan(t, this); b.DownloadHandler = new TabDownload(this);
         b.KeyboardHandler = new TabKeyboard(this); b.MenuHandler = new TabContextMenu(t, this); b.PermissionHandler = new TabPermissions(t);
-        b.FindHandler = new TabFind(this); b.FocusHandler = new TabFocus(t, this); b.JsDialogHandler = new TabJsDialog(this); b.RequestHandler = new TabRequest();
+        b.FindHandler = new TabFind(this); b.FocusHandler = new TabFocus(t, this); b.JsDialogHandler = new TabJsDialog(this); b.RequestHandler = new TabRequest(t, this); b.RenderProcessMessageHandler = new CosmeticInjector(t);
         b.LoadingStateChanged += (_, e) => Dispatcher.BeginInvoke(() =>
         {
             t.Loading = e.IsLoading; t.CanBack = e.CanGoBack; t.CanFwd = e.CanGoForward;
@@ -333,7 +334,7 @@ public partial class MainWindow : Window
         Lock.Text = t.Url.StartsWith("https:") ? "🔒" : t.Url.StartsWith("http:") ? "⚠" : "";
         bool bm = Store.D.Bookmarks.Any(b => b.Url == t.Url);
         StarBtn.Content = bm ? "★" : "☆"; StarBtn.Foreground = bm ? new SolidColorBrush(Color.FromRgb(0xF9, 0xAB, 0x00)) : (Brush)FindResource("Fg");
-        UpdateZoomLabel();
+        UpdateZoomLabel(); UpdateShield();
     }
     void UpdateZoomLabel()
     {
@@ -443,6 +444,33 @@ public partial class MainWindow : Window
 
     // ---------------------------------------------------------------- bookmarks
     public static void RefreshAll() { foreach (var w in App.Browsers.ToList()) { w.RefreshBookmarks(); w.UpdateToolbar(); } }
+
+    // ---------------------------------------------------------------- ad blocker shield
+    public void OnBlocked(Tab t) { if (t == Cur) UpdateShield(); }
+    static string Short(int n) => n < 1000 ? n.ToString() : n < 10000 ? (n / 1000.0).ToString("0.#") + "k" : (n / 1000) + "k";
+    void UpdateShield()
+    {
+        var t = Cur; if (t == null) return;
+        bool show = Store.D.Settings.AdBlock && t.Host.Length > 0;
+        ShieldBtn.Visibility = show ? Visibility.Visible : Visibility.Collapsed; if (!show) return;
+        bool paused = AdBlocker.IsPaused(t.Host);
+        ShieldIcon.Kind = paused ? MaterialDesignThemes.Wpf.PackIconKind.ShieldOffOutline : MaterialDesignThemes.Wpf.PackIconKind.ShieldCheckOutline;
+        ShieldIcon.Foreground = paused ? (Brush)FindResource("Mut") : (Brush)FindResource("Acc");
+        int n = t.BlockedCount;
+        ShieldCount.Text = paused || n == 0 ? "" : Short(n); ShieldCount.Visibility = ShieldCount.Text == "" ? Visibility.Collapsed : Visibility.Visible;
+        ShieldBtn.ToolTip = paused ? $"Ad blocking is paused on {t.Host}" : n == 0 ? "Ad blocker is on. Nothing blocked on this page." : $"{n:N0} blocked on this page";
+    }
+    void Shield_Click(object s, RoutedEventArgs e)
+    {
+        var t = Cur; if (t == null || t.Host.Length == 0) return;
+        bool paused = AdBlocker.IsPaused(t.Host);
+        var m = new ContextMenu { PlacementTarget = ShieldBtn, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+        var head = Ic.Item(paused ? $"Blocking is paused on {t.Host}" : t.BlockedCount == 0 ? "Nothing blocked on this page" : $"{t.BlockedCount:N0} blocked on this page", null, null, paused ? MaterialDesignThemes.Wpf.PackIconKind.ShieldOffOutline : MaterialDesignThemes.Wpf.PackIconKind.ShieldCheckOutline);
+        head.IsEnabled = false; m.Items.Add(head); m.Items.Add(new Separator());
+        m.Items.Add(Ic.Item(paused ? $"Resume blocking on {t.Host}" : $"Pause blocking on {t.Host}", () => { AdBlocker.SetPaused(t.Host, !paused); lock (t.BlockedUrls) t.BlockedUrls.Clear(); t.BlockedCount = 0; t.Browser.Reload(); foreach (var w in App.Browsers.ToList()) w.UpdateShield(); }, null, paused ? MaterialDesignThemes.Wpf.PackIconKind.ShieldCheckOutline : MaterialDesignThemes.Wpf.PackIconKind.ShieldOffOutline));
+        m.Items.Add(Ic.Item("Ad blocker settings…", () => ShowSettings("Privacy"), null, MaterialDesignThemes.Wpf.PackIconKind.CogOutline));
+        m.IsOpen = true;
+    }
 
     public void ToggleBookmark()
     {

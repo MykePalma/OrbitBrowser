@@ -77,13 +77,16 @@
             <Border x:Name="Omni" Grid.Column="1" Margin="8,6" CornerRadius="16" Background="{StaticResource Field}" BorderThickness="1" BorderBrush="Transparent">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock x:Name="Lock" Margin="12,0,4,0" VerticalAlignment="Center" Foreground="{StaticResource Mut}" Text=""/>
                     <TextBox x:Name="UrlBox" Grid.Column="1" Background="Transparent" BorderThickness="0" Foreground="{StaticResource Fg}" CaretBrush="{StaticResource Fg}"
                              VerticalContentAlignment="Center" FontSize="14" Padding="2,0" PreviewKeyDown="Url_KeyDown" GotKeyboardFocus="Url_Focus" LostKeyboardFocus="Url_Lost" TextChanged="Url_Changed" PreviewMouseLeftButtonDown="Url_Click"/>
-                    <TextBlock x:Name="ZoomLbl" Grid.Column="2" VerticalAlignment="Center" Margin="4,0" Foreground="{StaticResource Mut}" Cursor="Hand" ToolTip="Reset zoom" MouseDown="Zoom_Click"/>
-                    <Button x:Name="StarBtn" Grid.Column="3" Content="☆" Style="{StaticResource Flat}" Width="28" Height="28" Margin="0,0,3,0" ToolTip="Bookmark this page (Ctrl+D)" Click="Star_Click"/>
+                    <Button x:Name="ShieldBtn" Grid.Column="2" Style="{StaticResource Flat}" Width="Auto" Height="28" MinWidth="30" Padding="6,0" Visibility="Collapsed" Click="Shield_Click" AutomationProperties.Name="Ad blocker" Margin="0,0,2,0">
+                        <StackPanel Orientation="Horizontal"><md:PackIcon x:Name="ShieldIcon" Kind="ShieldCheckOutline" Width="18" Height="18" VerticalAlignment="Center"/><TextBlock x:Name="ShieldCount" Margin="4,0,0,0" FontSize="12" VerticalAlignment="Center" Visibility="Collapsed"/></StackPanel>
+                    </Button>
+                    <TextBlock x:Name="ZoomLbl" Grid.Column="3" VerticalAlignment="Center" Margin="4,0" Foreground="{StaticResource Mut}" Cursor="Hand" ToolTip="Reset zoom" MouseDown="Zoom_Click"/>
+                    <Button x:Name="StarBtn" Grid.Column="4" Content="☆" Style="{StaticResource Flat}" Width="28" Height="28" Margin="0,0,3,0" ToolTip="Bookmark this page (Ctrl+D)" Click="Star_Click"/>
                     <Popup x:Name="SuggPopup" PlacementTarget="{Binding ElementName=Omni}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" Focusable="False">
                         <ListBox x:Name="SuggList" Width="{Binding ActualWidth, ElementName=Omni}" MaxHeight="320" Background="{StaticResource Bar}" Foreground="{StaticResource Fg}" BorderBrush="#55FFFFFF" Focusable="False"
                                  PreviewMouseLeftButtonUp="Sugg_Click"/>

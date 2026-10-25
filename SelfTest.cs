@@ -76,6 +76,30 @@ static class SelfTest
 
     public static async Task Run(MainWindow w)
     {
+        if (App.SelfTest == "--selftest-ads")
+        {
+            await Task.Delay(1500); Store.D.Settings.AdBlock = true; await AdBlocker.UpdateAsync();
+            var lines = new List<string>();
+            AdBlocker.Trace = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            foreach (var site in new[] { "https://www.cnn.com/", "https://www.dailymail.co.uk/", "https://www.speedtest.net/" })
+            {
+                w.Navigate(site); await Task.Delay(22000); var cur = w.Cur;
+                var hidden = await Js(cur, "String([...document.querySelectorAll('*')].filter(e => getComputedStyle(e).display === 'none' && e.getAttribute('class') && /(^|[ _-])(ad|ads|advert|sponsor|banner)([ _-]|$)/i.test(e.getAttribute('class'))).length)");
+                lines.Add($"{site} blocked={cur.BlockedCount} hiddenAdElements={hidden}"); File.WriteAllLines(Path.Combine(Path.GetTempPath(), "orbit-ads-result.txt"), lines); File.WriteAllLines(Path.Combine(Path.GetTempPath(), "orbit-ads-trace.txt"), AdBlocker.Trace.ToArray());
+            }
+            await Task.Delay(60000); Application.Current.Shutdown(); return;
+        }
+        if (App.SelfTest == "--selftest-shots")
+        {
+            // a tidy, realistic state for marketing screenshots (throwaway profile)
+            Store.D.Folders.AddRange(new[] { "Reading", "Projects" });
+            Store.D.Bookmarks.AddRange(new[] { new Bookmark { Title = "Orbit on GitHub", Url = "https://github.com/MykePalma/OrbitBrowser" }, new Bookmark { Title = "myke.pt", Url = "https://myke.pt/" }, new Bookmark { Title = "DuckDuckGo", Url = "https://duckduckgo.com/" } });
+            w.Width = 1280; w.Height = 820; MainWindow.RefreshAll();
+            await Task.Delay(1200); w.Navigate("https://myke.pt/"); w.NewTab("https://duckduckgo.com/", false); await Task.Delay(6000);
+            w.TabList.SelectedIndex = 0; await Task.Delay(500); w.ToggleSplit(); await Task.Delay(600); w.Navigate("https://github.com/MykePalma/OrbitBrowser"); await Task.Delay(9000);
+            w.ToggleBookmark(); await Task.Delay(800);
+            await Task.Delay(90000); Application.Current.Shutdown(); return;
+        }
         if (App.SelfTest == "--selftest-live")
         {
             await Task.Delay(1500); var now = DateTime.Now;
@@ -93,7 +117,10 @@ static class SelfTest
                 try
                 {
                     var c = await lst.GetContextAsync(); var p = c.Request.Url.AbsolutePath; byte[] body; string ct = "text/html";
-                    if (p == "/updapi/releases/latest") { body = System.Text.Encoding.UTF8.GetBytes(FakeJson ?? "{}"); ct = "application/json"; }
+                    if (p == "/adtest") { body = System.Text.Encoding.UTF8.GetBytes("<html><body><div class='ad-banner' id='b'>AD</div><img id='i' src='/ads/banner.png' onerror='window.imgBlocked=1' onload='window.imgLoaded=1'><script src='/ads/track.js'></script><p id='c'>content</p></body></html>"); }
+                    else if (p == "/ads/banner.png") { body = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="); ct = "image/png"; }
+                    else if (p == "/ads/track.js") { body = System.Text.Encoding.UTF8.GetBytes("window.trk=1;"); ct = "text/javascript"; }
+                    else if (p == "/updapi/releases/latest") { body = System.Text.Encoding.UTF8.GetBytes(FakeJson ?? "{}"); ct = "application/json"; }
                     else if (p == "/updfiles/Orbit-win-x64.zip") { body = FakeZip ?? Array.Empty<byte>(); ct = "application/zip"; }
                     else if (p == "/file.bin") { body = new byte[300000]; ct = "application/octet-stream"; c.Response.AddHeader("Content-Disposition", "attachment; filename=file.bin"); }
                     else if (p == "/auth") { c.Response.StatusCode = 401; c.Response.AddHeader("WWW-Authenticate", "Basic realm=\"t\""); body = System.Text.Encoding.UTF8.GetBytes("no"); }
@@ -235,6 +262,85 @@ static class SelfTest
               var kids = w.BmPanel.Children.OfType<System.Windows.Controls.Button>().Where(x => BtnText(x) is "First" or "Second").ToList();
               if (kids.Count == 2) { var l = kids[0].TranslatePoint(new Point(kids[0].ActualWidth, 0), w).X; var r = kids[1].TranslatePoint(new Point(0, 0), w).X; var textGap = (r + 8) - (l - 8); R("bookmark bar: items are spaced apart", r - l >= 4 && textGap >= 16, $"button gap={r - l:0.#}px, visible text gap={textGap:0.#}px"); } else R("bookmark bar: items are spaced apart", false, "buttons not found");
               Store.D.Bookmarks.Remove(b1); Store.D.Bookmarks.Remove(b2); MainWindow.RefreshAll(); }
+
+            // ---- ad blocker: engine
+            FilterEngine E(string rules) => new FilterEngine().Also(x => x.AddList(rules)).Seal();
+            bool Bl(FilterEngine e, string url, string doc = "page.test", ReqType ty = ReqType.Script) => e.ShouldBlock(url, doc, ty);
+            { var e = E("||ads.example.com^");
+              R("adblock: ||host^ blocks the host, its subdomains and ports", Bl(e, "http://ads.example.com/x.js") && Bl(e, "https://cdn.ads.example.com/a") && Bl(e, "http://ads.example.com:8080/") && Bl(e, "http://ads.example.com"));
+              R("adblock: ||host^ leaves look-alikes alone", !Bl(e, "http://notads.example.com/x") && !Bl(e, "http://example.com/ads.example.com/x") && !Bl(e, "http://ads.example.com.evil.test/x") && !Bl(e, "http://example.com/"));
+              var s = E("/banner/*/img^");
+              R("adblock: * and ^ wildcards", Bl(s, "http://x.test/banner/300/img?x=1") && Bl(s, "http://x.test/banner/300/img") && Bl(s, "http://x.test/banner/a/b/img/") && !Bl(s, "http://x.test/banner/300/imgs") && !Bl(s, "http://x.test/banner/300/img.png"));
+              var a1 = E("|http://tracker.\n.swf|");
+              R("adblock: | start and end anchors", Bl(a1, "http://tracker.example.com/x") && !Bl(a1, "https://tracker.example.com/x") && !Bl(a1, "http://other.test/?u=http://tracker.x") && Bl(a1, "http://x.test/a.swf") && !Bl(a1, "http://x.test/a.swf?x=1"));
+              var tp = E("||cdn.example.com^$third-party");
+              R("adblock: $third-party only blocks other sites", Bl(tp, "http://cdn.example.com/a.js", "page.test") && !Bl(tp, "http://cdn.example.com/a.js", "www.example.com") && !Bl(tp, "http://cdn.example.com/a.js", "cdn.example.com"));
+              var fp = E("||x.test/f$~third-party");
+              R("adblock: $~third-party only blocks the site's own requests", Bl(fp, "http://x.test/f", "www.x.test") && !Bl(fp, "http://x.test/f", "other.test"));
+              var ty = E("||x.test/ad$script\n||x.test/pix$~image\n||x.test/img$image,stylesheet");
+              R("adblock: resource-type options", Bl(ty, "http://x.test/ad", "p.test", ReqType.Script) && !Bl(ty, "http://x.test/ad", "p.test", ReqType.Image) && Bl(ty, "http://x.test/pix", "p.test", ReqType.Script) && !Bl(ty, "http://x.test/pix", "p.test", ReqType.Image)
+                  && Bl(ty, "http://x.test/img", "p.test", ReqType.Stylesheet) && !Bl(ty, "http://x.test/img", "p.test", ReqType.Script));
+              var ex = E("||ads.example.com^\n@@||ads.example.com/allowed/");
+              R("adblock: @@ exceptions win", Bl(ex, "http://ads.example.com/x.js") && !Bl(ex, "http://ads.example.com/allowed/a.js"));
+              var impR = E("||a.test^$important\n@@||a.test^");
+              R("adblock: $important beats an exception", Bl(impR, "http://a.test/x"));
+              var dom = E("||s.test/track$domain=news.test|~sub.news.test");
+              R("adblock: $domain= limits where a rule applies", Bl(dom, "http://s.test/track", "news.test") && Bl(dom, "http://s.test/track", "www.news.test") && !Bl(dom, "http://s.test/track", "other.test") && !Bl(dom, "http://s.test/track", "sub.news.test"));
+              var doc = E("||ads.example.com^\n@@||news.test^$document");
+              R("adblock: @@...$document switches blocking off for a site", Bl(doc, "http://ads.example.com/x", "other.test") && !Bl(doc, "http://ads.example.com/x", "news.test") && !Bl(doc, "http://ads.example.com/x", "www.news.test"));
+              var junk = E("! comment\n[Adblock Plus 2.0]\n/regex.*rule/\n||x.test^$csp=script-src 'none'\n||y.test^$redirect=noopt\n||z.test^$popup\n||ok.test^\n##+js(abort-on-property-read, foo)\nsite.test##div:has-text(Sponsored)");
+              R("adblock: comments and unsupported rules are skipped, the rest works", junk.NetworkRules == 1 && junk.Skipped >= 5 && Bl(junk, "http://ok.test/x") && !Bl(junk, "http://x.test/y") && !Bl(junk, "http://y.test/y"), $"rules={junk.NetworkRules} skipped={junk.Skipped}");
+              var mc = E("/Banner.GIF$match-case");
+              R("adblock: match-case and default case-insensitivity", Bl(mc, "http://x.test/Banner.GIF") && !Bl(mc, "http://x.test/banner.gif") && Bl(E("/banner.gif"), "http://x.test/BANNER.GIF"));
+              var ce = E("##.ad-banner\n##.promo\nnews.test##div#sponsor\nnews.test#@#.promo\n~safe.test##.sidebar-ad\n#@#.never");
+              var nCss = ce.CosmeticCss("news.test"); var oCss = ce.CosmeticCss("www.other.test"); var sCss = ce.CosmeticCss("safe.test");
+              R("adblock: element hiding is generic, per-domain and with exceptions", nCss.Contains(".ad-banner{display:none!important}") && nCss.Contains("div#sponsor{") && !nCss.Contains(".promo{") && oCss.Contains(".promo{") && !oCss.Contains("div#sponsor") && oCss.Contains(".sidebar-ad{") && !sCss.Contains(".sidebar-ad{") && sCss.Contains(".ad-banner{"), nCss);
+              R("adblock: registrable domain for third-party checks", FilterEngine.RegDomain("a.b.example.com") == "example.com" && FilterEngine.RegDomain("www.bbc.co.uk") == "bbc.co.uk" && FilterEngine.RegDomain("example.com") == "example.com" && FilterEngine.RegDomain("127.0.0.1") == "127.0.0.1"); }
+            { var swp = System.Diagnostics.Stopwatch.StartNew(); var sbp = new System.Text.StringBuilder(); var rnd = new Random(7);
+              for (int k = 0; k < 20000; k++) { sbp.Append("||ad").Append(k).Append(".tracker").Append(k % 500).Append(".test^$third-party\n"); sbp.Append("/ads").Append(k).Append("/banner*.gif\n"); sbp.Append("-sponsor").Append(k).Append("-\n"); }
+              var big = E(sbp.ToString()); var parse = swp.ElapsedMilliseconds; swp.Restart(); int hits = 0;
+              for (int k = 0; k < 3000; k++) { if (big.ShouldBlock($"https://cdn{k}.example.com/assets/img/photo{k}.jpg?size=large&v={k}", "page.test", ReqType.Image)) hits++; if (big.ShouldBlock($"https://ad{k * 3}.tracker{(k * 3) % 500}.test/x.js", "page.test", ReqType.Script)) hits++; }
+              R("adblock: 60,000 rules parse quickly and 6,000 lookups are fast", parse < 4000 && swp.ElapsedMilliseconds < 600 && hits == 3000 && big.NetworkRules == 60000, $"parse={parse}ms lookups={swp.ElapsedMilliseconds}ms hits={hits}"); }
+            { Store.D.Settings.AdAllow.Clear(); AdBlocker.SetPaused("news.test", true);
+              R("adblock: pausing a site covers its subdomains", AdBlocker.IsPaused("news.test") && AdBlocker.IsPaused("www.news.test") && !AdBlocker.IsPaused("othernews.test") && !AdBlocker.IsPaused("test"));
+              AdBlocker.SetPaused("news.test", false); R("adblock: resuming a site", !AdBlocker.IsPaused("www.news.test")); }
+
+            // ---- ad blocker: in the real browser (blocked requests, hidden boxes, shield count, pausing)
+            { Store.D.Settings.AdBlock = true; Store.D.Settings.AdAllow.Clear(); AdBlocker.UseEngine(E("/ads/banner.png\n/ads/track.js$script\nlocalhost##.ad-banner"));
+              var at = w.NewTab(U("adtest")); await Until(() => !at.Loading && at.Url.Contains("adtest"), 8000); await Task.Delay(2000);
+              var imgBlocked = await Js(at, "String(window.imgBlocked)"); var trk = await Js(at, "String(window.trk)"); var imgLoaded = await Js(at, "String(window.imgLoaded)");
+              var boxDisp = await Js(at, "getComputedStyle(document.getElementById('b')).display"); var contentDisp = await Js(at, "getComputedStyle(document.getElementById('c')).display");
+              R("adblock browser: ad image and script are blocked", imgBlocked == "1" && trk == "undefined" && imgLoaded == "undefined", $"img={imgBlocked} trk={trk} loaded={imgLoaded}");
+              R("adblock browser: the ad box is hidden, real content stays", boxDisp == "none" && contentDisp != "none", $"box={boxDisp} content={contentDisp}");
+              R("adblock browser: the blocked count is tracked", at.BlockedCount == 2, "count=" + at.BlockedCount);
+              w.TabList.SelectedItem = at; await Task.Delay(500); R("adblock browser: shield shows the count", w.ShieldBtn.Visibility == Visibility.Visible && w.ShieldCount.Text == "2", w.ShieldCount.Text);
+              AdBlocker.SetPaused("localhost", true); at.Browser.Reload(true); await Task.Delay(3000);
+              imgLoaded = await Js(at, "String(window.imgLoaded)"); trk = await Js(at, "String(window.trk)"); boxDisp = await Js(at, "getComputedStyle(document.getElementById('b')).display");
+              R("adblock browser: pausing a site lets everything load", imgLoaded == "1" && trk == "1" && boxDisp != "none" && at.BlockedCount == 0, $"loaded={imgLoaded} trk={trk} box={boxDisp} count={at.BlockedCount}");
+              R("adblock browser: shield shows the paused state", w.ShieldIcon.Kind == MaterialDesignThemes.Wpf.PackIconKind.ShieldOffOutline && w.ShieldCount.Text == "");
+              AdBlocker.SetPaused("localhost", false); Store.D.Settings.AdBlock = false; at.Browser.Reload(true); await Task.Delay(3000);
+              imgLoaded = await Js(at, "String(window.imgLoaded)"); trk = await Js(at, "String(window.trk)");
+              R("adblock browser: switching the blocker off lets everything load", imgLoaded == "1" && trk == "1" && at.BlockedCount == 0, $"loaded={imgLoaded} trk={trk}");
+              Store.D.Settings.AdBlock = true; AdBlocker.UseEngine(AdBlocker.Build()); w.CloseTab(at); }
+
+            // ---- ad blocker: the real filter lists (needs a network connection; reported but never fails the run)
+            try
+            {
+                var sw2 = System.Diagnostics.Stopwatch.StartNew(); Store.D.Settings.AdBlock = true; bool dl = await AdBlocker.UpdateAsync(); var real = AdBlocker.Engine; var ms = sw2.ElapsedMilliseconds;
+                if (!dl) log.Add("INFO adblock: could not download the real filter lists (offline?)");
+                else
+                {
+                    R("adblock real lists: downloaded and parsed", real.NetworkRules > 20000 && real.CosmeticRules > 3000, $"network={real.NetworkRules:N0} exceptions={real.ExceptionRules:N0} page rules={real.CosmeticRules:N0} skipped={real.Skipped:N0} in {ms}ms");
+                    var blockedUrls = new[] { ("https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js", ReqType.Script), ("https://securepubads.g.doubleclick.net/tag/js/gpt.js", ReqType.Script), ("https://www.google-analytics.com/analytics.js", ReqType.Script), ("https://connect.facebook.net/en_US/fbevents.js", ReqType.Script), ("https://cdn.taboola.com/libtrc/loader.js", ReqType.Script), ("https://static.criteo.net/js/ld/publishertag.js", ReqType.Script) };
+                    var okUrls = new[] { ("https://example.com/", ReqType.SubDocument), ("https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js", ReqType.Script), ("https://fonts.googleapis.com/css2?family=Inter", ReqType.Stylesheet), ("https://www.google.com/search?q=orbit", ReqType.SubDocument), ("https://github.com/MykePalma/OrbitBrowser", ReqType.SubDocument), ("https://upload.wikimedia.org/wikipedia/commons/a/a9/Example.jpg", ReqType.Image) };
+                    var missed = blockedUrls.Where(u => !real.ShouldBlock(u.Item1, "news.example.org", u.Item2)).Select(u => u.Item1).ToList();
+                    var wrong = okUrls.Where(u => real.ShouldBlock(u.Item1, "news.example.org", u.Item2)).Select(u => u.Item1).ToList();
+                    R("adblock real lists: well-known ad and tracker URLs are blocked", missed.Count == 0, string.Join(", ", missed));
+                    R("adblock real lists: normal sites and libraries are not", wrong.Count == 0, string.Join(", ", wrong));
+                    var css = real.CosmeticCss("news.example.org"); R("adblock real lists: page-cleaning CSS is produced", css.Length > 10000, $"{css.Length / 1024} KB of CSS");
+                }
+            }
+            catch (Exception ex) { log.Add("INFO adblock real lists: " + ex.GetType().Name + " " + ex.Message); }
 
             // ---- custom title bar
             R("window chrome installed", System.Windows.Shell.WindowChrome.GetWindowChrome(w) != null && w.WindowStyle == WindowStyle.SingleBorderWindow);

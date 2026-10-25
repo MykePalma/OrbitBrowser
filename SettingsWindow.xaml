@@ -86,10 +86,48 @@
                     <StackPanel x:Name="PagePrivacy" Visibility="Collapsed">
                         <TextBlock Text="Privacy and security" Style="{StaticResource TextTitle}"/>
                         <Border Style="{StaticResource Card}" Margin="0,24,0,0">
-                            <local:SettingRow Title="Block ads and trackers" Description="Blocks requests to a built-in list of common ad and analytics domains. Turn it off if a site doesn't work properly.">
+                            <local:SettingRow Title="Block ads and trackers" Description="Stops adverts and trackers using the filter lists below, and hides the empty boxes ads leave behind. Turn it off if a site doesn't work properly.">
                                 <CheckBox x:Name="TglAds" Style="{StaticResource Switch}" Click="Ads_Click" AutomationProperties.Name="Block ads and trackers"/>
                             </local:SettingRow>
                         </Border>
+                        <TextBlock Text="Filter lists" Style="{StaticResource TextStrong}" Margin="0,24,0,8"/>
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <local:SettingRow Title="Ads (EasyList)" Description="Blocks adverts and hides the empty boxes they leave behind.">
+                                    <CheckBox x:Name="TglEasyList" Style="{StaticResource Switch}" Click="EasyList_Click" AutomationProperties.Name="Ads (EasyList)"/>
+                                </local:SettingRow>
+                                <Border Style="{StaticResource Divider}"/>
+                                <local:SettingRow Title="Trackers (EasyPrivacy)" Description="Blocks scripts and pixels that follow you from site to site.">
+                                    <CheckBox x:Name="TglEasyPrivacy" Style="{StaticResource Switch}" Click="EasyPrivacy_Click" AutomationProperties.Name="Trackers (EasyPrivacy)"/>
+                                </local:SettingRow>
+                                <Border Style="{StaticResource Divider}"/>
+                                <StackPanel Margin="16,12,16,16">
+                                    <TextBlock x:Name="FilterStatus" Style="{StaticResource TextCaption}"/>
+                                    <ProgressBar x:Name="FilterProg" Style="{StaticResource Thin}" IsIndeterminate="False" Value="100" Margin="0,10,0,0" Visibility="Collapsed"/>
+                                    <Button x:Name="FilterUpdate" Content="Update lists now" Style="{StaticResource Btn}" HorizontalAlignment="Left" Margin="0,12,0,0" Click="FilterUpdate_Click"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        <TextBlock Text="Lists come from easylist.to and are downloaded when Orbit starts, then refreshed every few days. This blocks adverts on web pages; it can't remove ads that a site streams inside its own videos (for example on YouTube)." Style="{StaticResource TextCaption}" Margin="0,8,0,0"/>
+
+                        <TextBlock Text="Paused sites" Style="{StaticResource TextStrong}" Margin="0,24,0,8"/>
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel Margin="0,4">
+                                <TextBlock x:Name="PausedEmpty" Text="No sites are paused. Use the shield button next to the address bar to pause blocking on a site." Style="{StaticResource TextCaption}" Margin="16,12"/>
+                                <ItemsControl x:Name="PausedList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid MinHeight="40" Margin="16,0,8,0">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding}" Style="{StaticResource TextBody}" VerticalAlignment="Center"/>
+                                                <Button Grid.Column="1" Style="{StaticResource BtnGhost}" Content="Resume blocking" Tag="{Binding}" Click="Resume_Click"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+
                         <TextBlock Text="Browsing data" Style="{StaticResource TextStrong}" Margin="0,24,0,8"/>
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
